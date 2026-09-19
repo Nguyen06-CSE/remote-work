@@ -14,66 +14,61 @@ public sealed class MonitoringService : IMonitoringService
     private readonly AgentOptions _options;
     private readonly ILogger<MonitoringService> _logger;
 
+
     private Task? _monitoringTask;
     private CancellationTokenSource? _internalCts;
 
     public MonitoringService(
-        IActivityCollector activityCollector,
-        IInputActivityProvider inputProvider,
-        IOptions<AgentOptions> options,
-        ILogger<MonitoringService> logger)
-    {
-        _activityCollector = activityCollector;
-        _inputProvider = inputProvider;
-        _options = options.Value;
-        _logger = logger;
-    }
+    IActivityCollector activityCollector,
+    IInputActivityProvider inputProvider,
+    IOptions<AgentOptions> options,
+    ILogger<MonitoringService> logger)
+{
+    _activityCollector = activityCollector;
+    _inputProvider = inputProvider;
+    _options = options.Value;
+    _logger = logger;
+}
 
-    public Task StartAsync(
-        CancellationToken cancellationToken)
-    {
-        if (_monitoringTask is not null)
-            return Task.CompletedTask;
-
-        _inputProvider.Start();
-
-        _internalCts =
-            CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken);
-
-        _monitoringTask =
-            RunAsync(_internalCts.Token);
-
+    public Task StartAsync(CancellationToken cancellationToken)
+{
+    if (_monitoringTask is not null)
         return Task.CompletedTask;
-    }
 
-    public async Task StopAsync(
-        CancellationToken cancellationToken)
+    // ⭐ BẮT BUỘC: khởi động input hook trước
+    _inputProvider.Start();
+    _logger.LogInformation("Input hooks installed.");
+
+    _internalCts =
+        CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+
+    _monitoringTask = RunAsync(_internalCts.Token);
+
+    return Task.CompletedTask;
+}
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+{
+    if (_internalCts is null)
+        return;
+
+    await _internalCts.CancelAsync();
+
+    if (_monitoringTask is not null)
     {
-        if (_internalCts is null)
-            return;
-
-        await _internalCts.CancelAsync();
-
-        if (_monitoringTask is not null)
-        {
-            try
-            {
-                await _monitoringTask;
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during shutdown.
-            }
-        }
-
-        _monitoringTask = null;
-
-        _internalCts.Dispose();
-        _internalCts = null;
-
-        _inputProvider.Stop();
+        try { await _monitoringTask; }
+        catch (OperationCanceledException) { }
     }
+
+    // ⭐ BẮT BUỘC: gỡ hook
+    _inputProvider.Stop();
+    _logger.LogInformation("Input hooks removed.");
+
+    _monitoringTask = null;
+    _internalCts.Dispose();
+    _internalCts = null;
+}
 
     private async Task RunAsync(
         CancellationToken cancellationToken)
