@@ -5,4 +5,6 @@ namespace RemoteWork.Agent.Core.Interfaces;
 public interface IActivityCollector
 {
     IReadOnlyList<ActivityEvent> Collect();
+
+    ActivityBatch FlushBatch();
 }

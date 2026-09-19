@@ -6,21 +6,21 @@ namespace RemoteWork.Agent.Collectors.Activity.Idle;
 
 public sealed class IdleActivityCollector
 {
-    private readonly WindowsInputActivityProvider _inputProvider;
+    private readonly WindowsIdleTimeProvider _idleProvider;
     private readonly AgentOptions _options;
 
     public IdleActivityCollector(
-        WindowsInputActivityProvider inputProvider,
+        WindowsIdleTimeProvider idleProvider,
         IOptions<AgentOptions> options)
     {
-        _inputProvider = inputProvider;
+        _idleProvider = idleProvider;
         _options = options.Value;
     }
 
     public bool IsUserActive()
     {
         var idleTime =
-            _inputProvider.GetIdleTime();
+            _idleProvider.GetIdleTime();
 
         return idleTime.TotalSeconds <
                _options.IdleThresholdSeconds;

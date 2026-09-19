@@ -15,6 +15,13 @@ using RemoteWork.Agent.Collectors.Activity;
 using RemoteWork.Agent.Collectors.Activity.Idle;
 using RemoteWork.Agent.Platform.Windows.Input;
 
+
+using RemoteWork.Agent.Collectors.Activity.Keyboard;
+using RemoteWork.Agent.Collectors.Activity.Mouse;
+using RemoteWork.Agent.Monitoring;
+
+
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
@@ -39,6 +46,43 @@ builder.Services.AddSingleton<WindowsInputActivityProvider>();
 builder.Services.AddSingleton<IdleActivityCollector>();
 
 builder.Services.AddSingleton<IActivityCollector, ActivityCollector>();
+
+builder.Services.AddSingleton<WindowsInputActivityProvider>();
+builder.Services.AddSingleton<IInputActivityProvider>(
+    sp => sp.GetRequiredService<WindowsInputActivityProvider>());
+
+builder.Services.AddSingleton<WindowsIdleTimeProvider>();
+
+builder.Services.AddSingleton<IdleActivityCollector>();
+builder.Services.AddSingleton<KeyboardActivityCollector>();
+builder.Services.AddSingleton<MouseActivityCollector>();
+
+builder.Services.AddSingleton<IActivityCollector, ActivityCollector>();
+
+builder.Services.AddSingleton<WindowsInputActivityProvider>();
+
+builder.Services.AddSingleton<IInputActivityProvider>(
+    sp =>
+        sp.GetRequiredService<
+            WindowsInputActivityProvider>());
+
+builder.Services.AddSingleton<
+    WindowsIdleTimeProvider>();
+
+builder.Services.AddSingleton<
+    IdleActivityCollector>();
+
+builder.Services.AddSingleton<
+    KeyboardActivityCollector>();
+
+builder.Services.AddSingleton<
+    MouseActivityCollector>();
+
+builder.Services.AddSingleton<
+    IActivityCollector,
+    ActivityCollector>();
+
+builder.Services.AddSingleton<IMonitoringService, MonitoringService>();
 
 
 

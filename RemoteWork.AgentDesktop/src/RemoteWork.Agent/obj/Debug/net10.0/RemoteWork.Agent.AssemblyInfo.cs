@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RemoteWork.Agent")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4c7f7a53cd8e5ed1cf06407e71f3724b265f1f71")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+ad61fb8bfd55619078cfa79d2e291a2950399911")]
 [assembly: System.Reflection.AssemblyProductAttribute("RemoteWork.Agent")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RemoteWork.Agent")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -9,6 +9,11 @@ public sealed class AgentRuntimeState
 
     public DateTimeOffset StartedAt { get; private set; }
 
+    public void MarkStarting()
+    {
+        Status = AgentStatus.Starting;
+    }
+
     public void MarkRunning()
     {
         Status = AgentStatus.Running;

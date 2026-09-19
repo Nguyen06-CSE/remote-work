@@ -1,11 +1,12 @@
+// src/RemoteWork.Agent/Worker.cs
+
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using RemoteWork.Agent.Configuration;
-using RemoteWork.Agent.Core.Models;
-using RemoteWork.Agent;
 using RemoteWork.Agent.Collectors.Device;
+using RemoteWork.Agent.Configuration;
 using RemoteWork.Agent.Core.Interfaces;
+using RemoteWork.Agent.Core.Models;
 
 namespace RemoteWork.Agent;
 
@@ -15,21 +16,23 @@ public sealed class Worker : BackgroundService
     private readonly AgentOptions _options;
     private readonly AgentRuntimeState _state;
     private readonly DeviceCollector _deviceCollector;
-
     private readonly ISessionCollector _sessionCollector;
+    private readonly IMonitoringService _monitoringService;
 
     public Worker(
-    ILogger<Worker> logger,
-    IOptions<AgentOptions> options,
-    AgentRuntimeState state,
-    DeviceCollector deviceCollector,
-    ISessionCollector sessionCollector)
+        ILogger<Worker> logger,
+        IOptions<AgentOptions> options,
+        AgentRuntimeState state,
+        DeviceCollector deviceCollector,
+        ISessionCollector sessionCollector,
+        IMonitoringService monitoringService)
     {
         _logger = logger;
         _options = options.Value;
         _state = state;
         _deviceCollector = deviceCollector;
         _sessionCollector = sessionCollector;
+        _monitoringService = monitoringService;
     }
 
     protected override async Task ExecuteAsync(
@@ -50,57 +53,60 @@ public sealed class Worker : BackgroundService
             "Backend: {Backend}",
             _options.BackendBaseUrl);
 
-        _state.MarkRunning();
-
-        var deviceInfo = _deviceCollector.Collect();
-
-        var session = _sessionCollector.StartSession(
-    deviceInfo.DeviceId);
-
-        _logger.LogInformation(
-            "Current session: {SessionId}",
-            session.SessionId);
-
-        _logger.LogInformation(
-            "Device ID: {DeviceId}",
-            deviceInfo.DeviceId);
-
-        _logger.LogInformation(
-            "Hostname: {Hostname}",
-            deviceInfo.Hostname);
-
-        _logger.LogInformation(
-            "Operating System: {OperatingSystem}",
-            deviceInfo.OperatingSystem);
-
-        _logger.LogInformation(
-            "OS Version: {OsVersion}",
-            deviceInfo.OsVersion);
-
-        _logger.LogInformation(
-            "Agent Version: {AgentVersion}",
-            deviceInfo.AgentVersion);
-
-
-        _logger.LogInformation(
-            "Agent status: {Status}",
-            _state.Status);
-
         try
         {
-            while (!stoppingToken.IsCancellationRequested)
-            {
-                _logger.LogDebug(
-                    "Agent heartbeat at {Time}",
-                    DateTimeOffset.UtcNow);
+            _state.MarkStarting();
 
-                await Task.Delay(
-                    TimeSpan.FromSeconds(30),
-                    stoppingToken);
-            }
+            // 1. Thu thập thông tin thiết bị
+            var device = _deviceCollector.Collect();
+
+            _logger.LogInformation(
+                "Device ID: {DeviceId}",
+                device.DeviceId);
+
+            _logger.LogInformation(
+                "Hostname: {Hostname}",
+                device.Hostname);
+
+            _logger.LogInformation(
+                "Operating System: {OperatingSystem}",
+                device.OperatingSystem);
+
+            _logger.LogInformation(
+                "OS Version: {OsVersion}",
+                device.OsVersion);
+
+            _logger.LogInformation(
+                "Agent Version: {AgentVersion}",
+                device.AgentVersion);
+
+            // 2. Bắt đầu session
+            var session =
+                _sessionCollector.StartSession(device.DeviceId);
+
+            _logger.LogInformation(
+                "Current session: {SessionId}",
+                session.SessionId);
+
+            // 3. Chuyển state sang Running
+            _state.MarkRunning();
+
+            _logger.LogInformation(
+                "Agent status: {Status}",
+                _state.Status);
+
+            // 4. Khởi động MonitoringService
+            //    (nó sẽ install input hook + chạy activity loop)
+            await _monitoringService.StartAsync(stoppingToken);
+
+            // 5. Giữ Worker chạy cho tới khi có tín hiệu shutdown
+            await Task.Delay(
+                Timeout.Infinite,
+                stoppingToken);
         }
         catch (OperationCanceledException)
         {
+            // Shutdown bình thường — không log error
             _logger.LogInformation(
                 "Shutdown requested.");
         }
@@ -110,7 +116,7 @@ public sealed class Worker : BackgroundService
 
             _logger.LogError(
                 ex,
-                "Agent encountered an unexpected error.");
+                "Agent execution failed.");
 
             throw;
         }
@@ -118,11 +124,15 @@ public sealed class Worker : BackgroundService
         {
             _state.MarkStopping();
 
-            _sessionCollector.EndSession();
-
             _logger.LogInformation(
                 "Agent status: {Status}",
                 _state.Status);
+
+            // Dừng monitoring trước khi kết thúc session
+            await _monitoringService.StopAsync(
+                CancellationToken.None);
+
+            _sessionCollector.EndSession();
 
             _state.MarkStopped();
 
