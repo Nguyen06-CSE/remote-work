@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using RemoteWork.Agent.Configuration;
 using RemoteWork.Agent.Core.Models;
 using RemoteWork.Agent;
+using RemoteWork.Agent.Collectors.Device;
 
 namespace RemoteWork.Agent;
 
@@ -12,15 +13,18 @@ public sealed class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly AgentOptions _options;
     private readonly AgentRuntimeState _state;
+    private readonly DeviceCollector _deviceCollector;
 
     public Worker(
-        ILogger<Worker> logger,
-        IOptions<AgentOptions> options,
-        AgentRuntimeState state)
+    ILogger<Worker> logger,
+    IOptions<AgentOptions> options,
+    AgentRuntimeState state,
+    DeviceCollector deviceCollector)
     {
         _logger = logger;
         _options = options.Value;
         _state = state;
+        _deviceCollector = deviceCollector;
     }
 
     protected override async Task ExecuteAsync(
@@ -42,6 +46,29 @@ public sealed class Worker : BackgroundService
             _options.BackendBaseUrl);
 
         _state.MarkRunning();
+
+        var deviceInfo = _deviceCollector.Collect();
+
+        _logger.LogInformation(
+            "Device ID: {DeviceId}",
+            deviceInfo.DeviceId);
+
+        _logger.LogInformation(
+            "Hostname: {Hostname}",
+            deviceInfo.Hostname);
+
+        _logger.LogInformation(
+            "Operating System: {OperatingSystem}",
+            deviceInfo.OperatingSystem);
+
+        _logger.LogInformation(
+            "OS Version: {OsVersion}",
+            deviceInfo.OsVersion);
+
+        _logger.LogInformation(
+            "Agent Version: {AgentVersion}",
+            deviceInfo.AgentVersion);
+
 
         _logger.LogInformation(
             "Agent status: {Status}",

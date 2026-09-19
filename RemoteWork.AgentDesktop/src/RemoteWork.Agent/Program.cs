@@ -4,6 +4,11 @@ using RemoteWork.Agent.Configuration;
 using RemoteWork.Agent.Core.Models;
 using RemoteWork.Agent;
 
+using RemoteWork.Agent.Collectors.Device;
+using RemoteWork.Agent.Core.Interfaces;
+using RemoteWork.Agent.Platform.Windows;
+using RemoteWork.Agent.Storage;
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
@@ -12,6 +17,12 @@ builder.Services
     .ValidateOnStart();
 
 builder.Services.AddSingleton<AgentRuntimeState>();
+
+builder.Services.AddSingleton<IDeviceIdentityStore, DeviceIdentityStore>();
+
+builder.Services.AddSingleton<IDeviceInfoProvider, WindowsDeviceInfoProvider>();
+
+builder.Services.AddSingleton<DeviceCollector>();
 
 builder.Services.AddHostedService<Worker>();
 
