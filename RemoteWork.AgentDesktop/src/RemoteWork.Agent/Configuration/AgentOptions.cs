@@ -10,4 +10,8 @@ public sealed class AgentOptions
 
     public string BackendBaseUrl { get; set; } =
         "http://localhost:8000";
+
+    public int ActivitySamplingIntervalSeconds { get; set; } = 10;
+
+    public int IdleThresholdSeconds { get; set; } = 300;
 }

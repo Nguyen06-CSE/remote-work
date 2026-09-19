@@ -11,6 +11,10 @@ using RemoteWork.Agent.Storage;
 
 using RemoteWork.Agent.Collectors.Session;
 
+using RemoteWork.Agent.Collectors.Activity;
+using RemoteWork.Agent.Collectors.Activity.Idle;
+using RemoteWork.Agent.Platform.Windows.Input;
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
@@ -29,6 +33,12 @@ builder.Services.AddSingleton<DeviceCollector>();
 builder.Services.AddSingleton<ISessionCollector, SessionCollector>();
 
 builder.Services.AddHostedService<Worker>();
+
+builder.Services.AddSingleton<WindowsInputActivityProvider>();
+
+builder.Services.AddSingleton<IdleActivityCollector>();
+
+builder.Services.AddSingleton<IActivityCollector, ActivityCollector>();
 
 
 
