@@ -9,6 +9,8 @@ using RemoteWork.Agent.Core.Interfaces;
 using RemoteWork.Agent.Platform.Windows;
 using RemoteWork.Agent.Storage;
 
+using RemoteWork.Agent.Collectors.Session;
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
@@ -24,7 +26,11 @@ builder.Services.AddSingleton<IDeviceInfoProvider, WindowsDeviceInfoProvider>();
 
 builder.Services.AddSingleton<DeviceCollector>();
 
+builder.Services.AddSingleton<ISessionCollector, SessionCollector>();
+
 builder.Services.AddHostedService<Worker>();
+
+
 
 var host = builder.Build();
 

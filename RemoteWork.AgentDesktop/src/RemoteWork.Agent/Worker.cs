@@ -5,6 +5,7 @@ using RemoteWork.Agent.Configuration;
 using RemoteWork.Agent.Core.Models;
 using RemoteWork.Agent;
 using RemoteWork.Agent.Collectors.Device;
+using RemoteWork.Agent.Core.Interfaces;
 
 namespace RemoteWork.Agent;
 
@@ -15,16 +16,20 @@ public sealed class Worker : BackgroundService
     private readonly AgentRuntimeState _state;
     private readonly DeviceCollector _deviceCollector;
 
+    private readonly ISessionCollector _sessionCollector;
+
     public Worker(
     ILogger<Worker> logger,
     IOptions<AgentOptions> options,
     AgentRuntimeState state,
-    DeviceCollector deviceCollector)
+    DeviceCollector deviceCollector,
+    ISessionCollector sessionCollector)
     {
         _logger = logger;
         _options = options.Value;
         _state = state;
         _deviceCollector = deviceCollector;
+        _sessionCollector = sessionCollector;
     }
 
     protected override async Task ExecuteAsync(
@@ -48,6 +53,13 @@ public sealed class Worker : BackgroundService
         _state.MarkRunning();
 
         var deviceInfo = _deviceCollector.Collect();
+
+        var session = _sessionCollector.StartSession(
+    deviceInfo.DeviceId);
+
+        _logger.LogInformation(
+            "Current session: {SessionId}",
+            session.SessionId);
 
         _logger.LogInformation(
             "Device ID: {DeviceId}",
@@ -105,6 +117,8 @@ public sealed class Worker : BackgroundService
         finally
         {
             _state.MarkStopping();
+
+            _sessionCollector.EndSession();
 
             _logger.LogInformation(
                 "Agent status: {Status}",
