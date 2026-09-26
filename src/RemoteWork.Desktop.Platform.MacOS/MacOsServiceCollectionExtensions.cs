@@ -10,6 +10,9 @@ public static class MacOsServiceCollectionExtensions
         services.AddSingleton<IDeviceInfoProvider, MacOsDeviceInfoProvider>();
         services.AddSingleton<IIdleTimeProvider, MacOsIdleTimeProvider>();
         services.AddSingleton<IInputActivityProvider, MacOsInputActivityProvider>();
+        services.AddSingleton<IActiveApplicationProvider, MacOsActiveApplicationProvider>();
+        services.AddSingleton<IPlatformPermissionProvider, MacOsPlatformPermissionProvider>();
+        services.AddSingleton<IScreenshotProvider, MacOsScreenshotProvider>();
         return services;
     }
 }

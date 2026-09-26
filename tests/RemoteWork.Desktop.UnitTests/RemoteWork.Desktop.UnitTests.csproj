@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -26,6 +26,9 @@
     <ProjectReference Include="..\..\src\RemoteWork.Desktop.Infrastructure\RemoteWork.Desktop.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\RemoteWork.Desktop.Persistence\RemoteWork.Desktop.Persistence.csproj" />
     <ProjectReference Include="..\..\src\RemoteWork.Desktop.Platform.Abstractions\RemoteWork.Desktop.Platform.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\RemoteWork.Desktop.Platform.Windows\RemoteWork.Desktop.Platform.Windows.csproj" />
+    <ProjectReference Include="..\..\src\RemoteWork.Desktop.Platform.MacOS\RemoteWork.Desktop.Platform.MacOS.csproj" />
+    <ProjectReference Include="..\..\src\RemoteWork.Desktop.Platform.Linux\RemoteWork.Desktop.Platform.Linux.csproj" />
   </ItemGroup>
 
 </Project>

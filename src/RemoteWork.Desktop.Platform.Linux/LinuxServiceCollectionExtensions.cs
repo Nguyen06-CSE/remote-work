@@ -10,6 +10,9 @@ public static class LinuxServiceCollectionExtensions
         services.AddSingleton<IDeviceInfoProvider, LinuxDeviceInfoProvider>();
         services.AddSingleton<IIdleTimeProvider, LinuxIdleTimeProvider>();
         services.AddSingleton<IInputActivityProvider, LinuxInputActivityProvider>();
+        services.AddSingleton<IActiveApplicationProvider, LinuxActiveApplicationProvider>();
+        services.AddSingleton<IPlatformPermissionProvider, LinuxPlatformPermissionProvider>();
+        services.AddSingleton<IScreenshotProvider, LinuxScreenshotProvider>();
         return services;
     }
 }

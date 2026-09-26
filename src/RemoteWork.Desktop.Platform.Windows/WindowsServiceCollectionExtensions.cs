@@ -10,6 +10,9 @@ public static class WindowsServiceCollectionExtensions
         services.AddSingleton<IDeviceInfoProvider, WindowsDeviceInfoProvider>();
         services.AddSingleton<IIdleTimeProvider, WindowsIdleTimeProvider>();
         services.AddSingleton<IInputActivityProvider, WindowsInputActivityProvider>();
+        services.AddSingleton<IActiveApplicationProvider, WindowsActiveApplicationProvider>();
+        services.AddSingleton<IPlatformPermissionProvider, WindowsPlatformPermissionProvider>();
+        services.AddSingleton<IScreenshotProvider, WindowsScreenshotProvider>();
         return services;
     }
 }
