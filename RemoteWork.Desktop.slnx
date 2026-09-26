@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RemoteWork.Desktop.Application/RemoteWork.Desktop.Application.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Core/RemoteWork.Desktop.Core.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Host/RemoteWork.Desktop.Host.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Infrastructure/RemoteWork.Desktop.Infrastructure.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Persistence/RemoteWork.Desktop.Persistence.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Platform.Abstractions/RemoteWork.Desktop.Platform.Abstractions.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Platform.Linux/RemoteWork.Desktop.Platform.Linux.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Platform.MacOS/RemoteWork.Desktop.Platform.MacOS.csproj" />
+    <Project Path="src/RemoteWork.Desktop.Platform.Windows/RemoteWork.Desktop.Platform.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RemoteWork.Desktop.IntegrationTests/RemoteWork.Desktop.IntegrationTests.csproj" />
+    <Project Path="tests/RemoteWork.Desktop.UnitTests/RemoteWork.Desktop.UnitTests.csproj" />
+  </Folder>
+</Solution>
