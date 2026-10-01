@@ -19,4 +19,5 @@ public sealed class ActivityBatch
     public TimeSpan ActiveDuration { get; init; }
 
     public TimeSpan IdleDuration { get; init; }
+    public bool HasSuspiciousMouseActivity { get; init; }
 }

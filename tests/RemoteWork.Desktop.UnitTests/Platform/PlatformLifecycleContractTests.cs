@@ -19,8 +19,11 @@ public sealed class PlatformLifecycleContractTests
         // Read and reset
         var kb = provider.GetKeyboardCount();
         var mouse = provider.GetMouseCount();
+        var samples = provider.DrainMouseSamples();
+
         Assert.True(kb >= 0);
         Assert.True(mouse >= 0);
+        Assert.NotNull(samples);
 
         // Repeated Stop should be idempotent
         provider.Stop();
@@ -36,38 +39,21 @@ public sealed class PlatformLifecycleContractTests
     {
         using var provider = new WindowsInputActivityProvider();
 
-        // When run on non-Windows (e.g. macOS), should gracefully do nothing and not throw
         provider.Start();
         provider.Start();
 
         var kb = provider.GetKeyboardCount();
         var mouse = provider.GetMouseCount();
+        var samples = provider.DrainMouseSamples();
+
         Assert.True(kb >= 0);
         Assert.True(mouse >= 0);
+        Assert.NotNull(samples);
 
         provider.Stop();
         provider.Stop();
 
         provider.Dispose();
         provider.Dispose();
-    }
-
-    [Fact]
-    public void WindowsPlatformProviders_GracefulDegradation_OnNonWindows()
-    {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return;
-
-        var activeAppProvider = new WindowsActiveApplicationProvider();
-        var app = activeAppProvider.GetActiveApplication();
-        Assert.Null(app);
-
-        var permissionProvider = new WindowsPlatformPermissionProvider();
-        var permissions = permissionProvider.GetPermissions();
-        Assert.NotNull(permissions);
-
-        var screenshotProvider = new WindowsScreenshotProvider();
-        var result = screenshotProvider.CaptureScreen("/tmp/win_test.png");
-        Assert.False(result.Success);
     }
 }

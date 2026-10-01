@@ -1,3 +1,4 @@
+using RemoteWork.Desktop.Core.Models.Activity;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Platform.Linux;
@@ -43,6 +44,11 @@ public sealed class LinuxInputActivityProvider : IInputActivityProvider
             _mouseCount = 0;
             return count;
         }
+    }
+
+    public IReadOnlyList<MouseClickSample> DrainMouseSamples()
+    {
+        return Array.Empty<MouseClickSample>();
     }
 
     public void Dispose()

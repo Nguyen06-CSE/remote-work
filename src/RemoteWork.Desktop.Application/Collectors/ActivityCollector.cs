@@ -11,6 +11,7 @@ public sealed class ActivityCollector : IActivityCollector
     private readonly IIdleActivityCollector _idleCollector;
     private readonly IKeyboardActivityCollector _keyboardCollector;
     private readonly IMouseActivityCollector _mouseCollector;
+    private readonly IMouseBotDetector _mouseBotDetector;
     private readonly ILogger<ActivityCollector> _logger;
 
     private readonly ActivityAccumulator _accumulator = new();
@@ -24,12 +25,14 @@ public sealed class ActivityCollector : IActivityCollector
         IIdleActivityCollector idleCollector,
         IKeyboardActivityCollector keyboardCollector,
         IMouseActivityCollector mouseCollector,
+        IMouseBotDetector mouseBotDetector,
         ILogger<ActivityCollector> logger)
     {
         _sessionCollector = sessionCollector;
         _idleCollector = idleCollector;
         _keyboardCollector = keyboardCollector;
         _mouseCollector = mouseCollector;
+        _mouseBotDetector = mouseBotDetector;
         _logger = logger;
     }
 
@@ -109,6 +112,25 @@ public sealed class ActivityCollector : IActivityCollector
             });
         }
 
+        // Bot Detection: Draining & Purging coordinates immediately
+        var mouseSamples = _mouseCollector.DrainSamples();
+        if (mouseSamples.Count > 0)
+        {
+            var detectionResult = _mouseBotDetector.Analyze(mouseSamples);
+            if (detectionResult.IsSuspicious)
+            {
+                _accumulator.MarkSuspiciousMouseActivity();
+                events.Add(new ActivityEvent
+                {
+                    EventId = Guid.NewGuid().ToString(),
+                    DeviceId = session.DeviceId,
+                    SessionId = session.SessionId,
+                    Timestamp = detectionResult.Timestamp,
+                    Type = ActivityEventType.SuspiciousActivityDetected
+                });
+            }
+        }
+
         return events;
     }
 
@@ -130,7 +152,8 @@ public sealed class ActivityCollector : IActivityCollector
             KeyboardCount = _accumulator.KeyboardCount,
             MouseCount = _accumulator.MouseCount,
             ActiveDuration = _accumulator.ActiveDuration,
-            IdleDuration = _accumulator.IdleDuration
+            IdleDuration = _accumulator.IdleDuration,
+            HasSuspiciousMouseActivity = _accumulator.HasSuspiciousMouseActivity
         };
 
         _accumulator.Reset();

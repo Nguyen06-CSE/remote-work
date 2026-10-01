@@ -4,5 +4,6 @@ public enum ActivityEventType
 {
     ActivityStateChanged,
     KeyboardActivity,
-    MouseActivity
+    MouseActivity,
+    SuspiciousActivityDetected
 }

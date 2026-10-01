@@ -10,6 +10,8 @@ public sealed class ActivityAccumulator
 
     public TimeSpan IdleDuration { get; private set; }
 
+    public bool HasSuspiciousMouseActivity { get; private set; }
+
     public void AddKeyboard(int count)
     {
         KeyboardCount += count;
@@ -30,11 +32,17 @@ public sealed class ActivityAccumulator
         IdleDuration += duration;
     }
 
+    public void MarkSuspiciousMouseActivity()
+    {
+        HasSuspiciousMouseActivity = true;
+    }
+
     public void Reset()
     {
         KeyboardCount = 0;
         MouseCount = 0;
         ActiveDuration = TimeSpan.Zero;
         IdleDuration = TimeSpan.Zero;
+        HasSuspiciousMouseActivity = false;
     }
 }

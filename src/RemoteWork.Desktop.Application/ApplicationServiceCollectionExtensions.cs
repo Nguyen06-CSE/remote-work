@@ -34,6 +34,7 @@ public static class ApplicationServiceCollectionExtensions
 
         services.AddSingleton<IKeyboardActivityCollector, KeyboardActivityCollector>();
         services.AddSingleton<IMouseActivityCollector, MouseActivityCollector>();
+        services.AddSingleton<IMouseBotDetector, MouseBotDetector>();
         services.AddSingleton<IActivityCollector, ActivityCollector>();
 
         services.AddSingleton<IMonitoringService>(sp =>

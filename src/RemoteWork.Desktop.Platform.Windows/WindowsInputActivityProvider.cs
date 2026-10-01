@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using RemoteWork.Desktop.Core.Models.Activity;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Platform.Windows;
@@ -17,9 +18,11 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
     private const int WM_MOUSEWHEEL = 0x020A;
 
     private const uint LLKHF_INJECTED = 0x00000010;
+    private const int MaxSamples = 200;
 
     private readonly object _lock = new();
     private readonly ManualResetEventSlim _hookReady = new(false);
+    private readonly Queue<MouseClickSample> _samples = new();
 
     private int _keyboardCount;
     private int _mouseCount;
@@ -104,6 +107,19 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
             var result = _mouseCount;
             _mouseCount = 0;
             return result;
+        }
+    }
+
+    public IReadOnlyList<MouseClickSample> DrainMouseSamples()
+    {
+        lock (_lock)
+        {
+            if (_samples.Count == 0)
+                return Array.Empty<MouseClickSample>();
+
+            var drained = _samples.ToArray();
+            _samples.Clear();
+            return drained;
         }
     }
 
@@ -203,6 +219,21 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
                 lock (_lock)
                 {
                     _mouseCount++;
+
+                    if (msg != WM_MOUSEWHEEL)
+                    {
+                        var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+                        var sample = new MouseClickSample(
+                            Environment.TickCount64,
+                            data.pt.x,
+                            data.pt.y);
+
+                        _samples.Enqueue(sample);
+                        if (_samples.Count > MaxSamples)
+                        {
+                            _samples.Dequeue();
+                        }
+                    }
                 }
             }
         }
@@ -218,6 +249,23 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT

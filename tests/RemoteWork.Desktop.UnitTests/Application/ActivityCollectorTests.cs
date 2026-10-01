@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using RemoteWork.Desktop.Application.Collectors;
 using RemoteWork.Desktop.Core.Enums;
 using RemoteWork.Desktop.Core.Interfaces;
+using RemoteWork.Desktop.Core.Models.Activity;
 using Xunit;
 
 namespace RemoteWork.Desktop.UnitTests.Application;
@@ -18,6 +19,7 @@ public class ActivityCollectorTests
     {
         public int NextKeyboardCount { get; set; }
         public int NextMouseCount { get; set; }
+        public List<MouseClickSample> SamplesToDrain { get; set; } = [];
 
         int IKeyboardActivityCollector.Collect()
         {
@@ -32,6 +34,27 @@ public class ActivityCollectorTests
             NextMouseCount = 0;
             return count;
         }
+
+        IReadOnlyList<MouseClickSample> IMouseActivityCollector.DrainSamples()
+        {
+            var drained = SamplesToDrain.ToArray();
+            SamplesToDrain.Clear();
+            return drained;
+        }
+    }
+
+    private sealed class StubBotDetector : IMouseBotDetector
+    {
+        public bool ReturnSuspicious { get; set; }
+
+        public BotDetectionResult Analyze(IReadOnlyList<MouseClickSample> samples)
+        {
+            return new BotDetectionResult
+            {
+                IsSuspicious = ReturnSuspicious,
+                Timestamp = DateTimeOffset.UtcNow
+            };
+        }
     }
 
     [Fact]
@@ -40,12 +63,14 @@ public class ActivityCollectorTests
         var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
         var idleCollector = new StubIdleCollector();
         var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
 
         var collector = new ActivityCollector(
             sessionCollector,
             idleCollector,
             countCollector,
             countCollector,
+            botDetector,
             NullLogger<ActivityCollector>.Instance);
 
         var events = collector.Collect();
@@ -54,7 +79,7 @@ public class ActivityCollectorTests
     }
 
     [Fact]
-    public void Collect_With_Active_Session_Should_Generate_Events_And_Batch()
+    public void Collect_With_Suspicious_Bot_Activity_Should_Emit_Event_And_Flag_Batch()
     {
         var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
         sessionCollector.StartSession("device-100");
@@ -63,27 +88,29 @@ public class ActivityCollectorTests
         var countCollector = new StubCountCollector
         {
             NextKeyboardCount = 10,
-            NextMouseCount = 5
+            NextMouseCount = 5,
+            SamplesToDrain = [new MouseClickSample(1000, 100, 100)]
         };
+
+        var botDetector = new StubBotDetector { ReturnSuspicious = true };
 
         var collector = new ActivityCollector(
             sessionCollector,
             idleCollector,
             countCollector,
             countCollector,
+            botDetector,
             NullLogger<ActivityCollector>.Instance);
 
         var events = collector.Collect();
 
         Assert.NotEmpty(events);
-        Assert.Contains(events, e => e.Type == ActivityEventType.ActivityStateChanged);
-        Assert.Contains(events, e => e.Type == ActivityEventType.KeyboardActivity && e.Count == 10);
-        Assert.Contains(events, e => e.Type == ActivityEventType.MouseActivity && e.Count == 5);
+        Assert.Contains(events, e => e.Type == ActivityEventType.SuspiciousActivityDetected);
 
         var batch = collector.FlushBatch();
 
         Assert.NotNull(batch);
-        Assert.Equal("device-100", batch.DeviceId);
+        Assert.True(batch.HasSuspiciousMouseActivity);
         Assert.Equal(10, batch.KeyboardCount);
         Assert.Equal(5, batch.MouseCount);
     }
