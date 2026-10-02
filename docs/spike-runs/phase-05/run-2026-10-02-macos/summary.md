@@ -1,9 +1,4 @@
 
----
-
-## File 3: `spike-runs/phase-05/run-2026-10-02-macos/summary.md`
-
-```markdown
 # Phase 05 — Run Summary (macOS)
 
 ## 📌 Metadata

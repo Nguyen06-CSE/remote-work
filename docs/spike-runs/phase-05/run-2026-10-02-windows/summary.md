@@ -1,9 +1,4 @@
 
----
-
-## File 4: `spike-runs/phase-05/run-2026-10-02-windows/summary.md`
-
-```markdown
 # Phase 05 — Run Summary (Windows)
 
 ## 📌 Metadata
