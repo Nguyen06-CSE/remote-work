@@ -5,6 +5,14 @@ using RemoteWork.Desktop.Core.Models.Activity;
 
 namespace RemoteWork.Desktop.Application.Collectors;
 
+/// <summary>
+/// Orchestrates input and idle activity sampling, state transition detection, and aggregation.
+/// Principles:
+/// - Only emits ActivityStateChanged when the state changes (Active <-> Idle).
+/// - Never emits redundant Active state events every cycle.
+/// - Accumulates keyboard and mouse counts into an ActivityAccumulator.
+/// - Flushes periodic ActivityBatch objects representing aggregated intervals.
+/// </summary>
 public sealed class ActivityCollector : IActivityCollector
 {
     private readonly ISessionCollector _sessionCollector;
@@ -49,22 +57,21 @@ public sealed class ActivityCollector : IActivityCollector
         var now = DateTimeOffset.UtcNow;
         _batchStartedAt ??= now;
 
+        var currentIsActive = _idleCollector.IsUserActive();
+        var currentActivityState = currentIsActive ? ActivityState.Active : ActivityState.Idle;
+
         if (_lastTimestamp is null)
         {
             _lastTimestamp = now;
         }
         else
         {
-            var isActive = _idleCollector.IsUserActive();
-            var currentState = isActive ? ActivityState.Active : ActivityState.Idle;
-            UpdateDuration(currentState, now);
+            UpdateDuration(currentActivityState, now);
         }
-
-        var currentIsActive = _idleCollector.IsUserActive();
-        var currentActivityState = currentIsActive ? ActivityState.Active : ActivityState.Idle;
 
         var events = new List<ActivityEvent>();
 
+        // Only emit state changed when state transitions between Active and Idle
         if (_previousState != currentActivityState)
         {
             events.Add(new ActivityEvent
@@ -112,7 +119,7 @@ public sealed class ActivityCollector : IActivityCollector
             });
         }
 
-        // Bot Detection: Draining & Purging coordinates immediately
+        // Ephemeral Bot Detection: Draining & Purging samples immediately
         var mouseSamples = _mouseCollector.DrainSamples();
         if (mouseSamples.Count > 0)
         {

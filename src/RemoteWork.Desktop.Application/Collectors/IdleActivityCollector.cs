@@ -5,11 +5,11 @@ namespace RemoteWork.Desktop.Application.Collectors;
 
 public sealed class IdleActivityCollector : IIdleActivityCollector
 {
-    private readonly IIdleTimeProvider _idleProvider;
+    private readonly IIdleProvider _idleProvider;
     private readonly int _idleThresholdSeconds;
 
     public IdleActivityCollector(
-        IIdleTimeProvider idleProvider,
+        IIdleProvider idleProvider,
         int idleThresholdSeconds = 300)
     {
         _idleProvider = idleProvider;

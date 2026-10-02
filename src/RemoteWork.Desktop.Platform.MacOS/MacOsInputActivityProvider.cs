@@ -1,13 +1,19 @@
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using RemoteWork.Desktop.Core.Models.Activity;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Platform.MacOS;
 
 /// <summary>
-/// Uses CGEventTap (Quartz Event Services) to count keyboard and mouse events on macOS.
-/// Stores up to 200 ephemeral mouse click samples in a RAM-only ring buffer for bot detection.
-/// Samples are strictly drained and never persisted to disk or logs.
+/// Uses CGEventTap (Quartz Event Services) to count keyboard and mouse interaction events on macOS.
+/// Privacy by Design:
+/// - Counts only: keyboard key-down events, mouse clicks (left/right/middle), and scroll wheel interactions.
+/// - Never collects or stores: typed text, key values, passwords, scan codes, or mouse X/Y coordinates.
+/// - Mouse movement is not counted as individual events.
+/// Permission:
+/// - Requires macOS Accessibility permission (AXIsProcessTrusted).
+/// - If permission is missing, logs a diagnostic warning and degrades safely without crashing.
 /// </summary>
 public sealed class MacOsInputActivityProvider : IInputActivityProvider
 {
@@ -21,8 +27,6 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
     private const ulong kCGEventRightMouseDown = 3;
     private const ulong kCGEventOtherMouseDown = 25;
     private const ulong kCGEventScrollWheel = 22;
-
-    private const int MaxSamples = 200;
 
     private static readonly IntPtr _kCFRunLoopCommonModes;
 
@@ -44,7 +48,7 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
     }
 
     private readonly object _lock = new();
-    private readonly Queue<MouseClickSample> _samples = new();
+    private readonly ILogger<MacOsInputActivityProvider>? _logger;
 
     private int _keyboardCount;
     private int _mouseCount;
@@ -54,8 +58,13 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
     private IntPtr _runLoop;
     private IntPtr _eventTap;
 
-    // prevent GC of delegate
+    // Prevent GC of delegate
     private CGEventTapCallBack? _callback;
+
+    public MacOsInputActivityProvider(ILogger<MacOsInputActivityProvider>? logger = null)
+    {
+        _logger = logger;
+    }
 
     public void Start()
     {
@@ -74,12 +83,17 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
         };
         _hookThread.Start();
 
-        // Wait briefly for the thread to set up
+        // Wait briefly for the hook thread to set up
         var waited = 0;
         while (!_started && !_stopping && waited < 3000)
         {
             Thread.Sleep(50);
             waited += 50;
+        }
+
+        if (!_started && !_stopping)
+        {
+            _logger?.LogWarning("Timed out initializing macOS CGEventTap. Input counting will remain disabled.");
         }
     }
 
@@ -92,7 +106,14 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
 
         if (_runLoop != IntPtr.Zero)
         {
-            try { CFRunLoopStop(_runLoop); } catch { /* already stopped */ }
+            try
+            {
+                CFRunLoopStop(_runLoop);
+            }
+            catch
+            {
+                // Already stopped
+            }
         }
 
         _hookThread?.Join(TimeSpan.FromSeconds(3));
@@ -128,15 +149,8 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
 
     public IReadOnlyList<MouseClickSample> DrainMouseSamples()
     {
-        lock (_lock)
-        {
-            if (_samples.Count == 0)
-                return Array.Empty<MouseClickSample>();
-
-            var drained = _samples.ToArray();
-            _samples.Clear();
-            return drained;
-        }
+        // No coordinates collected or stored under privacy policy
+        return Array.Empty<MouseClickSample>();
     }
 
     private void RunLoopThread()
@@ -163,6 +177,7 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
             if (_eventTap == IntPtr.Zero)
             {
                 _stopping = true;
+                _logger?.LogWarning("Failed to create macOS CGEventTap. Accessibility permission may not be granted. Input counting will be inactive until permission is granted.");
                 return;
             }
 
@@ -170,6 +185,7 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
             if (source == IntPtr.Zero)
             {
                 _stopping = true;
+                _logger?.LogWarning("Failed to create CFMachPortRunLoopSource for CGEventTap.");
                 return;
             }
 
@@ -179,18 +195,19 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
 
             _started = true;
 
-            CFRunLoopRun(); // blocks until CFRunLoopStop
+            CFRunLoopRun(); // Blocks until CFRunLoopStop is called
 
-            // Cleanup
+            // Cleanup resources
             CGEventTapEnable(_eventTap, false);
             CFRelease(source);
             CFRelease(_eventTap);
             _eventTap = IntPtr.Zero;
             _runLoop = IntPtr.Zero;
         }
-        catch
+        catch (Exception ex)
         {
             _stopping = true;
+            _logger?.LogError(ex, "Unexpected exception in macOS CGEventTap RunLoop thread.");
         }
 
         _started = false;
@@ -210,32 +227,10 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
                      type == kCGEventScrollWheel)
             {
                 _mouseCount++;
-
-                // Thu thập tọa độ chỉ cho các sự kiện click chuột thực sự (bỏ qua scroll wheel)
-                if (type != kCGEventScrollWheel && eventRef != IntPtr.Zero)
-                {
-                    try
-                    {
-                        var loc = CGEventGetLocation(eventRef);
-                        var sample = new MouseClickSample(
-                            Environment.TickCount64,
-                            (int)Math.Round(loc.X),
-                            (int)Math.Round(loc.Y));
-
-                        _samples.Enqueue(sample);
-                        if (_samples.Count > MaxSamples)
-                        {
-                            _samples.Dequeue();
-                        }
-                    }
-                    catch
-                    {
-                        // Graceful degradation nếu CGEventGetLocation không khả dụng
-                    }
-                }
             }
         }
 
+        // Return the event untouched; never block user input
         return eventRef;
     }
 
@@ -244,17 +239,7 @@ public sealed class MacOsInputActivityProvider : IInputActivityProvider
         Stop();
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct CGPoint
-    {
-        public double X;
-        public double Y;
-    }
-
     private delegate IntPtr CGEventTapCallBack(IntPtr proxy, uint type, IntPtr eventRef, IntPtr userInfo);
-
-    [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")]
-    private static extern CGPoint CGEventGetLocation(IntPtr eventRef);
 
     [DllImport("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")]
     private static extern IntPtr CGEventTapCreate(

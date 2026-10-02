@@ -3,6 +3,12 @@ using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Platform.Windows;
 
+/// <summary>
+/// Retrieves user idle duration on Windows using user32!GetLastInputInfo.
+/// Measures time elapsed since the last hardware input event across the desktop session.
+/// Handles 32-bit tick count wrapping safely.
+/// Returns TimeSpan.Zero on error without throwing unhandled exceptions.
+/// </summary>
 public sealed class WindowsIdleTimeProvider : IIdleTimeProvider
 {
     [StructLayout(LayoutKind.Sequential)]
@@ -29,12 +35,13 @@ public sealed class WindowsIdleTimeProvider : IIdleTimeProvider
 
         if (!GetLastInputInfo(ref info))
         {
-            throw new InvalidOperationException("Unable to retrieve Windows last input information.");
+            return TimeSpan.Zero;
         }
 
-        var tickCount = Environment.TickCount64;
-        var idleMilliseconds = tickCount - info.dwTime;
+        // Unsigned 32-bit subtraction correctly handles tick rollover every ~49.7 days
+        var currentTick = (uint)Environment.TickCount;
+        var idleMilliseconds = currentTick - info.dwTime;
 
-        return TimeSpan.FromMilliseconds(Math.Max(0, idleMilliseconds));
+        return TimeSpan.FromMilliseconds(idleMilliseconds);
     }
 }

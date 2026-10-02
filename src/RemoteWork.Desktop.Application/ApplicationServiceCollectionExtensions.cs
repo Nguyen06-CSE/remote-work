@@ -29,7 +29,7 @@ public static class ApplicationServiceCollectionExtensions
 
         services.AddSingleton<IIdleActivityCollector>(sp =>
         {
-            var idleProvider = sp.GetRequiredService<IIdleTimeProvider>();
+            var idleProvider = sp.GetRequiredService<IIdleProvider>();
             var options = sp.GetService<IOptions<TrackingOptions>>()?.Value ?? new TrackingOptions();
             return new IdleActivityCollector(idleProvider, options.IdleThresholdSeconds);
         });

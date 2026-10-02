@@ -114,4 +114,165 @@ public class ActivityCollectorTests
         Assert.Equal(10, batch.KeyboardCount);
         Assert.Equal(5, batch.MouseCount);
     }
+
+    [Fact]
+    public void StateTransitions_EmitsEventOnlyWhenStateActuallyChanges()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Cycle 1: First observation with Active state -> should emit ActivityStateChanged (IsActive = true)
+        var eventsCycle1 = collector.Collect();
+        var stateEvents1 = eventsCycle1.Where(e => e.Type == ActivityEventType.ActivityStateChanged).ToList();
+        Assert.Single(stateEvents1);
+        Assert.True(stateEvents1[0].IsActive);
+
+        // Cycle 2: Same state (Active) -> MUST NOT emit duplicate state change event
+        var eventsCycle2 = collector.Collect();
+        var stateEvents2 = eventsCycle2.Where(e => e.Type == ActivityEventType.ActivityStateChanged).ToList();
+        Assert.Empty(stateEvents2);
+
+        // Cycle 3: Transition to Idle -> MUST emit ActivityStateChanged (IsActive = false)
+        idleCollector.Active = false;
+        var eventsCycle3 = collector.Collect();
+        var stateEvents3 = eventsCycle3.Where(e => e.Type == ActivityEventType.ActivityStateChanged).ToList();
+        Assert.Single(stateEvents3);
+        Assert.False(stateEvents3[0].IsActive);
+
+        // Cycle 4: Same state (Idle) -> MUST NOT emit duplicate state change event
+        var eventsCycle4 = collector.Collect();
+        var stateEvents4 = eventsCycle4.Where(e => e.Type == ActivityEventType.ActivityStateChanged).ToList();
+        Assert.Empty(stateEvents4);
+
+        // Cycle 5: Transition back to Active -> MUST emit ActivityStateChanged (IsActive = true)
+        idleCollector.Active = true;
+        var eventsCycle5 = collector.Collect();
+        var stateEvents5 = eventsCycle5.Where(e => e.Type == ActivityEventType.ActivityStateChanged).ToList();
+        Assert.Single(stateEvents5);
+        Assert.True(stateEvents5[0].IsActive);
+    }
+
+    [Fact]
+    public void Collect_ZeroActivity_DoesNotEmitInputEvents()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector
+        {
+            NextKeyboardCount = 0,
+            NextMouseCount = 0
+        };
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Initialize state
+        collector.Collect();
+
+        // Sample with 0 activity
+        var events = collector.Collect();
+
+        // Should have zero keyboard or mouse events
+        Assert.DoesNotContain(events, e => e.Type == ActivityEventType.KeyboardActivity);
+        Assert.DoesNotContain(events, e => e.Type == ActivityEventType.MouseActivity);
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public void Collect_WithInputActivity_EmitsIndividualCounts()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Warm up initial state
+        collector.Collect();
+
+        // Supply counts
+        countCollector.NextKeyboardCount = 42;
+        countCollector.NextMouseCount = 18;
+
+        var events = collector.Collect();
+
+        var kbEvent = Assert.Single(events, e => e.Type == ActivityEventType.KeyboardActivity);
+        Assert.Equal(42, kbEvent.Count);
+
+        var mouseEvent = Assert.Single(events, e => e.Type == ActivityEventType.MouseActivity);
+        Assert.Equal(18, mouseEvent.Count);
+    }
+
+    [Fact]
+    public void ActivityAggregation_AggregatesCountsAcrossSamples_AndFlushBatchResets()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        var session = sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Sample 1: 15 kb, 5 mouse
+        countCollector.NextKeyboardCount = 15;
+        countCollector.NextMouseCount = 5;
+        collector.Collect();
+
+        // Sample 2: 25 kb, 10 mouse
+        countCollector.NextKeyboardCount = 25;
+        countCollector.NextMouseCount = 10;
+        collector.Collect();
+
+        // Flush Batch
+        var batch = collector.FlushBatch();
+
+        Assert.NotNull(batch);
+        Assert.Equal(session.SessionId, batch.SessionId);
+        Assert.Equal("device-001", batch.DeviceId);
+        Assert.Equal(40, batch.KeyboardCount); // 15 + 25
+        Assert.Equal(15, batch.MouseCount);    // 5 + 10
+        Assert.False(batch.HasSuspiciousMouseActivity);
+
+        // Second Flush immediately after should have 0 counts (counter reset verification)
+        var batch2 = collector.FlushBatch();
+        Assert.Equal(0, batch2.KeyboardCount);
+        Assert.Equal(0, batch2.MouseCount);
+    }
 }

@@ -1,9 +1,21 @@
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 using RemoteWork.Desktop.Core.Models.Activity;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Platform.Windows;
 
+/// <summary>
+/// Uses Win32 Low-Level hooks (WH_KEYBOARD_LL, WH_MOUSE_LL) to count keyboard and mouse events on Windows.
+/// Privacy by Design:
+/// - Counts only: keyboard key-down events, mouse clicks (left/right/middle), and scroll wheel interactions.
+/// - Never collects or stores: typed text, key values, passwords, scan codes, or mouse X/Y coordinates.
+/// - Mouse movement (WM_MOUSEMOVE) is explicitly not counted.
+/// Isolation & Safety:
+/// - Hooks run on a dedicated STA background thread with an explicit Win32 message pump (GetMessage/DispatchMessage).
+/// - Thread termination cleanly posts WM_QUIT and unhooks Win32 hooks.
+/// - Graceful degradation: does not throw or crash if hooks cannot be installed.
+/// </summary>
 public sealed class WindowsInputActivityProvider : IInputActivityProvider
 {
     private const int WH_KEYBOARD_LL = 13;
@@ -18,11 +30,10 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
     private const int WM_MOUSEWHEEL = 0x020A;
 
     private const uint LLKHF_INJECTED = 0x00000010;
-    private const int MaxSamples = 200;
 
     private readonly object _lock = new();
     private readonly ManualResetEventSlim _hookReady = new(false);
-    private readonly Queue<MouseClickSample> _samples = new();
+    private readonly ILogger<WindowsInputActivityProvider>? _logger;
 
     private int _keyboardCount;
     private int _mouseCount;
@@ -37,6 +48,11 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
     private uint _hookThreadId;
     private volatile bool _started;
     private volatile bool _stopping;
+
+    public WindowsInputActivityProvider(ILogger<WindowsInputActivityProvider>? logger = null)
+    {
+        _logger = logger;
+    }
 
     public void Start()
     {
@@ -62,12 +78,13 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
         if (!_hookReady.Wait(TimeSpan.FromSeconds(5)))
         {
-            throw new InvalidOperationException("Timed out installing Windows input hooks.");
+            _logger?.LogWarning("Timed out waiting for Windows input hooks initialization. Input counting disabled.");
+            return;
         }
 
         if (!_started)
         {
-            throw new InvalidOperationException("Failed to install Windows input hooks.");
+            _logger?.LogWarning("Failed to install Windows input hooks. Input counting disabled.");
         }
     }
 
@@ -80,7 +97,7 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
         if (_hookThreadId != 0)
         {
-            PostThreadMessage(_hookThreadId, 0x0012, IntPtr.Zero, IntPtr.Zero);
+            PostThreadMessage(_hookThreadId, 0x0012, IntPtr.Zero, IntPtr.Zero); // WM_QUIT
         }
 
         _hookThread?.Join(TimeSpan.FromSeconds(3));
@@ -92,6 +109,9 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
     public int GetKeyboardCount()
     {
+        if (!_started)
+            return 0;
+
         lock (_lock)
         {
             var result = _keyboardCount;
@@ -102,6 +122,9 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
     public int GetMouseCount()
     {
+        if (!_started)
+            return 0;
+
         lock (_lock)
         {
             var result = _mouseCount;
@@ -112,15 +135,8 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
     public IReadOnlyList<MouseClickSample> DrainMouseSamples()
     {
-        lock (_lock)
-        {
-            if (_samples.Count == 0)
-                return Array.Empty<MouseClickSample>();
-
-            var drained = _samples.ToArray();
-            _samples.Clear();
-            return drained;
-        }
+        // No mouse coordinates stored under privacy policy
+        return Array.Empty<MouseClickSample>();
     }
 
     private void HookThreadProc()
@@ -144,6 +160,8 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
         if (_keyboardHook == IntPtr.Zero || _mouseHook == IntPtr.Zero)
         {
+            _logger?.LogWarning("Windows SetWindowsHookEx failed with error code {ErrorCode}. Input counting will be disabled.", Marshal.GetLastWin32Error());
+
             if (_keyboardHook != IntPtr.Zero)
                 UnhookWindowsHookEx(_keyboardHook);
 
@@ -211,6 +229,9 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
         {
             var msg = wParam.ToInt32();
 
+            // Only count meaningful interactions: Left, Right, Middle, Wheel.
+            // Mouse movement (WM_MOUSEMOVE = 0x0200) is ignored.
+            // Coordinates are NEVER stored.
             if (msg == WM_LBUTTONDOWN ||
                 msg == WM_RBUTTONDOWN ||
                 msg == WM_MBUTTONDOWN ||
@@ -219,21 +240,6 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
                 lock (_lock)
                 {
                     _mouseCount++;
-
-                    if (msg != WM_MOUSEWHEEL)
-                    {
-                        var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-                        var sample = new MouseClickSample(
-                            Environment.TickCount64,
-                            data.pt.x,
-                            data.pt.y);
-
-                        _samples.Enqueue(sample);
-                        if (_samples.Count > MaxSamples)
-                        {
-                            _samples.Dequeue();
-                        }
-                    }
                 }
             }
         }
@@ -249,23 +255,6 @@ public sealed class WindowsInputActivityProvider : IInputActivityProvider
 
     private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
     private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int x;
-        public int y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MSLLHOOKSTRUCT
-    {
-        public POINT pt;
-        public uint mouseData;
-        public uint flags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct KBDLLHOOKSTRUCT

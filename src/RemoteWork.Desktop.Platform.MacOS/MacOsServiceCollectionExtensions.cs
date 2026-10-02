@@ -8,7 +8,9 @@ public static class MacOsServiceCollectionExtensions
     public static IServiceCollection AddMacOsPlatformServices(this IServiceCollection services)
     {
         services.AddSingleton<IDeviceInfoProvider, MacOsDeviceInfoProvider>();
-        services.AddSingleton<IIdleTimeProvider, MacOsIdleTimeProvider>();
+        services.AddSingleton<MacOsIdleTimeProvider>();
+        services.AddSingleton<IIdleTimeProvider>(sp => sp.GetRequiredService<MacOsIdleTimeProvider>());
+        services.AddSingleton<IIdleProvider>(sp => sp.GetRequiredService<MacOsIdleTimeProvider>());
         services.AddSingleton<IInputActivityProvider, MacOsInputActivityProvider>();
         services.AddSingleton<IActiveApplicationProvider, MacOsActiveApplicationProvider>();
         services.AddSingleton<IPlatformPermissionProvider, MacOsPlatformPermissionProvider>();

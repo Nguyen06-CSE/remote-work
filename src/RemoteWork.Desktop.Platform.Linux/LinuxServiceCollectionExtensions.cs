@@ -8,7 +8,9 @@ public static class LinuxServiceCollectionExtensions
     public static IServiceCollection AddLinuxPlatformServices(this IServiceCollection services)
     {
         services.AddSingleton<IDeviceInfoProvider, LinuxDeviceInfoProvider>();
-        services.AddSingleton<IIdleTimeProvider, LinuxIdleTimeProvider>();
+        services.AddSingleton<LinuxIdleTimeProvider>();
+        services.AddSingleton<IIdleTimeProvider>(sp => sp.GetRequiredService<LinuxIdleTimeProvider>());
+        services.AddSingleton<IIdleProvider>(sp => sp.GetRequiredService<LinuxIdleTimeProvider>());
         services.AddSingleton<IInputActivityProvider, LinuxInputActivityProvider>();
         services.AddSingleton<IActiveApplicationProvider, LinuxActiveApplicationProvider>();
         services.AddSingleton<IPlatformPermissionProvider, LinuxPlatformPermissionProvider>();
