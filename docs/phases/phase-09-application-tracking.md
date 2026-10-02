@@ -27,7 +27,8 @@ Key principles:
 
 ### 2.2 Platform Implementations
 - **macOS (`MacOsActiveApplicationProvider`)**:
-  - Uses `NSWorkspace.sharedWorkspace.frontmostApplication` via Objective-C runtime P/Invoke.
+  - Primary query: Direct WindowServer query via `CoreGraphics.framework` (`CGWindowListCopyWindowInfo`) for layer 0 normal windows, providing thread-safe active window tracking in CLI hosts without runloop dependencies.
+  - Secondary fallback: `NSWorkspace.sharedWorkspace.frontmostApplication` via Objective-C runtime P/Invoke, with dynamic `AppKit.framework` loading via `dlopen`.
   - Returns `ApplicationName`, `ProcessName`, `ProcessId`, and sets `WindowTitle = string.Empty`.
   - Registered as `IApplicationActivityProvider` and `IActiveApplicationProvider` in `MacOsServiceCollectionExtensions`.
 - **Windows (`WindowsActiveApplicationProvider`)**:
@@ -110,9 +111,9 @@ Key principles:
 - `PersistAndEnqueueApplicationActivity_Should_Save_To_SQLite_And_SyncQueue`: PASS
 
 ### Full Test Suite Execution Summary:
-- **Unit Tests:** 104 passed (0 failed, 0 skipped)
-- **Integration Tests:** 73 passed (0 failed, 0 skipped)
-- **Total:** 177 passed (100% green, ~2s runtime)
+- **Unit Tests:** 107 passed (0 failed, 0 skipped — including `MacOsActiveApplicationProviderTests`)
+- **Integration Tests:** 73 passed (0 failed, 0 skipped — including strict `MacOsPlatformIntegrationTests`)
+- **Total:** 180 passed (100% green, ~2s runtime)
 
 ---
 

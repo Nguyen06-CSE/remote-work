@@ -30,14 +30,12 @@ public sealed class MacOsPlatformIntegrationTests
         var provider = new MacOsActiveApplicationProvider();
         var app = provider.GetActiveApplication();
 
-        // In macOS GUI session, active app should not be null
-        if (app is not null)
-        {
-            Assert.True(app.ProcessId > 0, $"ProcessId should be positive, got: {app.ProcessId}");
-            Assert.False(string.IsNullOrWhiteSpace(app.ApplicationName) && string.IsNullOrWhiteSpace(app.ProcessName),
-                "Either ApplicationName or ProcessName must be present");
-            Assert.True(app.Timestamp <= DateTimeOffset.UtcNow, "Timestamp should not be in the future");
-        }
+        // In macOS GUI session, active app must not be null
+        Assert.NotNull(app);
+        Assert.True(app.ProcessId > 0, $"ProcessId should be positive, got: {app.ProcessId}");
+        Assert.False(string.IsNullOrWhiteSpace(app.ApplicationName) && string.IsNullOrWhiteSpace(app.ProcessName),
+            "Either ApplicationName or ProcessName must be present");
+        Assert.True(app.Timestamp <= DateTimeOffset.UtcNow, "Timestamp should not be in the future");
     }
 
     [Fact]

@@ -31,14 +31,16 @@ Tracking Coordinator
 ## 3. Platform Implementations
 
 ### 3.1 macOS (`MacOsActiveApplicationProvider`)
-- **API / Library:** Uses the native Objective-C runtime via `libobjc.dylib` P/Invoke (`objc_getClass`, `sel_registerName`, `objc_msgSend`).
+- **Primary Mechanism:** Direct WindowServer query via `CoreGraphics.framework` (`CGWindowListCopyWindowInfo`).
+  - Queries on-screen windows at layer 0 (`kCGNormalWindowLevel`).
+  - Extracts `kCGWindowOwnerName` and `kCGWindowOwnerPID`.
+  - Operates synchronously over Mach IPC from any thread without depending on a Cocoa event loop (`NSRunLoop.mainRunLoop` / `NSApplication`).
+- **Secondary Fallback:** Native Objective-C runtime via `libobjc.dylib` P/Invoke (`objc_getClass`, `sel_registerName`, `objc_msgSend`).
+  - Explicitly initializes `AppKit.framework` via `dlopen` so that `NSWorkspace` is registered in .NET console hosts.
   - Calls `[NSWorkspace sharedWorkspace] frontmostApplication`.
-  - Queries `localizedName` (NSRunningApplication) and `processIdentifier`.
-  - Resolves process name via .NET `System.Diagnostics.Process.GetProcessById(pid).ProcessName`.
-- **Permission Requirements:** None required for reading the frontmost application bundle name and PID.
+- **Permission Requirements:** None required for reading the application name and PID. Screen Recording permission is NOT needed because window titles and contents are strictly ignored.
 - **Polling Strategy:** Polled synchronously on each monitoring tick (default 10s in production, 2s in dev).
-- **Limitations:** Does not inspect child window hierarchies; provides application bundle level granularity.
-- **Performance:** Extremely lightweight (< 1ms per invocation, minimal CPU overhead).
+- **Performance:** Sub-millisecond execution time (< 0.1ms per invocation, minimal CPU overhead).
 
 ### 3.2 Windows (`WindowsActiveApplicationProvider`)
 - **API / Library:** Uses Win32 user32 APIs via P/Invoke:

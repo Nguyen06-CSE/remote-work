@@ -48,10 +48,21 @@ public sealed class ApplicationActivityCollector : IApplicationActivityCollector
             // Case 1: Same application remains active -> No redundant record generated
             if (IsSameApplication(_currentApp, newApp))
             {
+                if (_currentApp is not null)
+                {
+                    _logger.LogDebug("Active application unchanged: {AppName} (PID: {Pid})", _currentApp.ApplicationName, _currentApp.ProcessId);
+                }
                 return null;
             }
 
             // Case 2: Transition occurred
+            _logger.LogInformation(
+                "Active application transition detected: from '{FromApp}' ({FromPid}) to '{ToApp}' ({ToPid})",
+                _currentApp?.ApplicationName ?? "None",
+                _currentApp?.ProcessId ?? 0,
+                newApp?.ApplicationName ?? "None",
+                newApp?.ProcessId ?? 0);
+
             ApplicationActivity? completedActivity = null;
 
             if (_currentApp is not null && _currentAppStartedAt is not null)

@@ -49,6 +49,8 @@ public sealed class Worker : BackgroundService
         _logger.LogInformation("Environment: {Environment}", _options.Environment);
         _logger.LogInformation("Backend: {Backend}", _options.BackendBaseUrl);
 
+        var pendingTasks = new System.Collections.Concurrent.ConcurrentBag<Task>();
+
         try
         {
             _state.MarkStarting();
@@ -83,7 +85,7 @@ public sealed class Worker : BackgroundService
             // 4. Kết nối pipeline: Collector -> SQLite -> SyncQueue
             _monitoringService.OnBatchGenerated += batch =>
             {
-                _ = Task.Run(async () =>
+                var task = Task.Run(async () =>
                 {
                     try
                     {
@@ -96,11 +98,12 @@ public sealed class Worker : BackgroundService
                         _logger.LogError(ex, "Failed to persist and queue ActivityBatch {BatchId}.", batch.BatchId);
                     }
                 });
+                pendingTasks.Add(task);
             };
 
             _monitoringService.OnApplicationActivityGenerated += activity =>
             {
-                _ = Task.Run(async () =>
+                var task = Task.Run(async () =>
                 {
                     try
                     {
@@ -113,6 +116,7 @@ public sealed class Worker : BackgroundService
                         _logger.LogError(ex, "Failed to persist and queue ApplicationActivity {ActivityId}.", activity.ActivityId);
                     }
                 });
+                pendingTasks.Add(task);
             };
 
             // 5. Khởi động MonitoringService và SyncEngine
@@ -139,6 +143,20 @@ public sealed class Worker : BackgroundService
 
             await _syncEngine.StopAsync(CancellationToken.None);
             await _monitoringService.StopAsync(CancellationToken.None);
+
+            // Await any in-flight persistence tasks flushed during shutdown
+            var inFlight = pendingTasks.Where(t => !t.IsCompleted).ToArray();
+            if (inFlight.Length > 0)
+            {
+                try
+                {
+                    await Task.WhenAll(inFlight);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error while awaiting in-flight persistence tasks.");
+                }
+            }
             var endedSession = _sessionCollector.EndSession();
 
             if (endedSession != null)

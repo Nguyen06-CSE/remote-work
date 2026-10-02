@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\RemoteWork.Desktop.Platform.Abstractions\RemoteWork.Desktop.Platform.Abstractions.csproj" />
@@ -15,6 +15,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="RemoteWork.Desktop.UnitTests" />
+    <InternalsVisibleTo Include="RemoteWork.Desktop.IntegrationTests" />
+  </ItemGroup>
 
 </Project>
                                                
