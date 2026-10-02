@@ -58,4 +58,24 @@ public sealed class WindowsPlatformIntegrationTests
         Assert.Equal(4, permissions.Count);
         Assert.All(permissions, p => Assert.False(p.IsRequired));
     }
+
+    [Fact]
+    public void WindowsActiveApplicationProvider_OperatesWithoutCrash()
+    {
+        var provider = new WindowsActiveApplicationProvider();
+        var app = provider.GetActiveApplication();
+
+        if (IsWindows)
+        {
+            if (app is not null)
+            {
+                Assert.True(app.ProcessId > 0);
+                Assert.False(string.IsNullOrWhiteSpace(app.ApplicationName));
+            }
+        }
+        else
+        {
+            Assert.Null(app);
+        }
+    }
 }

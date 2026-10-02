@@ -12,7 +12,9 @@ public static class LinuxServiceCollectionExtensions
         services.AddSingleton<IIdleTimeProvider>(sp => sp.GetRequiredService<LinuxIdleTimeProvider>());
         services.AddSingleton<IIdleProvider>(sp => sp.GetRequiredService<LinuxIdleTimeProvider>());
         services.AddSingleton<IInputActivityProvider, LinuxInputActivityProvider>();
-        services.AddSingleton<IActiveApplicationProvider, LinuxActiveApplicationProvider>();
+        services.AddSingleton<LinuxActiveApplicationProvider>();
+        services.AddSingleton<IApplicationActivityProvider>(sp => sp.GetRequiredService<LinuxActiveApplicationProvider>());
+        services.AddSingleton<IActiveApplicationProvider>(sp => sp.GetRequiredService<LinuxActiveApplicationProvider>());
         services.AddSingleton<IPlatformPermissionProvider, LinuxPlatformPermissionProvider>();
         services.AddSingleton<IScreenshotProvider, LinuxScreenshotProvider>();
         return services;

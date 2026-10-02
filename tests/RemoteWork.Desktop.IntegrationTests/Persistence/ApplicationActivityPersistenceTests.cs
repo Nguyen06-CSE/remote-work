@@ -183,5 +183,44 @@ public sealed class ApplicationActivityPersistenceTests : IDisposable
         Assert.Equal(duration, found.Duration);
     }
 
+    [Fact]
+    public async Task PersistAndEnqueueApplicationActivity_Should_Save_To_SQLite_And_SyncQueue()
+    {
+        var appRepo = new ApplicationActivityRepository(_fixture.Context);
+        var syncRepo = new SyncQueueRepository(_fixture.Context);
+        var coordinator = new RemoteWork.Desktop.Application.Sync.TrackingPersistenceCoordinator(
+            new ActivityBatchRepository(_fixture.Context),
+            syncRepo,
+            appRepo,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<RemoteWork.Desktop.Application.Sync.TrackingPersistenceCoordinator>.Instance);
+
+        var activity = new ApplicationActivity
+        {
+            ActivityId = Guid.NewGuid().ToString("D"),
+            DeviceId = DeviceId,
+            SessionId = SessionId,
+            Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5),
+            ApplicationName = "Google Chrome",
+            ProcessName = "chrome",
+            ProcessId = 9876,
+            WindowTitle = null,
+            Duration = TimeSpan.FromMinutes(5)
+        };
+
+        var enqueued = await coordinator.PersistAndEnqueueApplicationActivityAsync(activity);
+
+        Assert.True(enqueued);
+
+        // Check SQLite persistence
+        var stored = await _fixture.Context.ApplicationActivities.FindAsync(activity.ActivityId);
+        Assert.NotNull(stored);
+        Assert.Equal("Google Chrome", stored.ApplicationName);
+
+        // Check SyncQueue
+        var pending = await syncRepo.GetPendingAsync();
+        var item = Assert.Single(pending, q => q.EntityId == activity.ActivityId);
+        Assert.Equal("ApplicationActivity", item.EntityType);
+    }
+
     public void Dispose() => _fixture.Dispose();
 }

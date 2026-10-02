@@ -98,6 +98,23 @@ public sealed class Worker : BackgroundService
                 });
             };
 
+            _monitoringService.OnApplicationActivityGenerated += activity =>
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var coordinator = scope.ServiceProvider.GetRequiredService<TrackingPersistenceCoordinator>();
+                        await coordinator.PersistAndEnqueueApplicationActivityAsync(activity);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to persist and queue ApplicationActivity {ActivityId}.", activity.ActivityId);
+                    }
+                });
+            };
+
             // 5. Khởi động MonitoringService và SyncEngine
             await _monitoringService.StartAsync(stoppingToken);
             await _syncEngine.StartAsync(stoppingToken);

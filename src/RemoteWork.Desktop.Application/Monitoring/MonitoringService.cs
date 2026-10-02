@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using RemoteWork.Desktop.Core.Interfaces;
-using RemoteWork.Desktop.Core.Models.Activity;
+using RemoteWork.Desktop.Core.Models;
+using ActivityBatch = RemoteWork.Desktop.Core.Models.Activity.ActivityBatch;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Application.Monitoring;
@@ -17,6 +18,7 @@ namespace RemoteWork.Desktop.Application.Monitoring;
 public sealed class MonitoringService : IMonitoringService
 {
     private readonly IActivityCollector _activityCollector;
+    private readonly IApplicationActivityCollector? _appActivityCollector;
     private readonly IInputActivityProvider _inputProvider;
     private readonly ISessionCollector _sessionCollector;
     private readonly int _samplingIntervalSeconds;
@@ -27,6 +29,7 @@ public sealed class MonitoringService : IMonitoringService
     private CancellationTokenSource? _internalCts;
 
     public event Action<ActivityBatch>? OnBatchGenerated;
+    public event Action<ApplicationActivity>? OnApplicationActivityGenerated;
 
     public MonitoringService(
         IActivityCollector activityCollector,
@@ -34,7 +37,8 @@ public sealed class MonitoringService : IMonitoringService
         ISessionCollector sessionCollector,
         int samplingIntervalSeconds,
         int batchIntervalSeconds,
-        ILogger<MonitoringService> logger)
+        ILogger<MonitoringService> logger,
+        IApplicationActivityCollector? appActivityCollector = null)
     {
         _activityCollector = activityCollector;
         _inputProvider = inputProvider;
@@ -42,6 +46,7 @@ public sealed class MonitoringService : IMonitoringService
         _samplingIntervalSeconds = samplingIntervalSeconds > 0 ? samplingIntervalSeconds : 10;
         _batchIntervalSeconds = batchIntervalSeconds > 0 ? batchIntervalSeconds : 60;
         _logger = logger;
+        _appActivityCollector = appActivityCollector;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -106,6 +111,21 @@ public sealed class MonitoringService : IMonitoringService
                     finalBatch.IdleDuration);
 
                 OnBatchGenerated?.Invoke(finalBatch);
+
+                if (_appActivityCollector is not null)
+                {
+                    var finalApp = _appActivityCollector.Flush(session.DeviceId, session.SessionId);
+                    if (finalApp is not null)
+                    {
+                        _logger.LogInformation(
+                            "Final application activity flushed on shutdown: {AppName} ({ProcessName}) | Duration: {Duration}s",
+                            finalApp.ApplicationName,
+                            finalApp.ProcessName,
+                            finalApp.Duration.TotalSeconds);
+
+                        OnApplicationActivityGenerated?.Invoke(finalApp);
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -154,6 +174,23 @@ public sealed class MonitoringService : IMonitoringService
                         activityEvent.SessionId,
                         activityEvent.Count,
                         activityEvent.IsActive);
+                }
+
+                // Sample active application transition
+                if (_appActivityCollector is not null)
+                {
+                    var appActivity = _appActivityCollector.Sample(session.DeviceId, session.SessionId);
+                    if (appActivity is not null)
+                    {
+                        _logger.LogInformation(
+                            "Application switched: {AppName} ({ProcessName}) | Duration: {Duration}s | Session: {SessionId}",
+                            appActivity.ApplicationName,
+                            appActivity.ProcessName,
+                            appActivity.Duration.TotalSeconds,
+                            appActivity.SessionId);
+
+                        OnApplicationActivityGenerated?.Invoke(appActivity);
+                    }
                 }
 
                 var elapsed = DateTimeOffset.UtcNow - lastBatchTime;

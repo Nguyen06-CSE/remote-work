@@ -11,11 +11,12 @@ public sealed class ActiveApplicationInfo
     public DateTimeOffset Timestamp { get; init; }
 }
 
+/// <summary>
+/// Alias / extension for <see cref="IApplicationActivityProvider"/> to preserve backwards compatibility.
+/// </summary>
 public interface IActiveApplicationProvider : IApplicationActivityProvider
 {
-    ActiveApplicationInfo? GetActiveApplication();
-
-    ApplicationActivity? IApplicationActivityProvider.GetActiveApplicationActivity()
+    ApplicationActivity? GetActiveApplicationActivity()
     {
         var app = GetActiveApplication();
         if (app is null) return null;

@@ -216,4 +216,48 @@ public class MonitoringServiceTests
         Assert.True(activityCollector.CollectCallCount >= 1);
         Assert.False(inputProvider.IsStarted);
     }
+
+    [Fact]
+    public async Task GracefulShutdown_FlushesApplicationActivity_WhenAppCollectorProvided()
+    {
+        var inputProvider = new MockInputActivityProvider();
+        var activityCollector = new MockActivityCollector();
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        var session = sessionCollector.StartSession("device-app-test");
+
+        var appCollector = new ApplicationActivityCollector(
+            new MockAppProvider { App = new ActiveApplicationInfo { ApplicationName = "VS Code", ProcessName = "Code", ProcessId = 42 } },
+            NullLogger<ApplicationActivityCollector>.Instance);
+
+        // Pre-sample so an application is active in collector
+        appCollector.Sample(session.DeviceId, session.SessionId, DateTimeOffset.UtcNow.AddMinutes(-5));
+
+        var monitoringService = new MonitoringService(
+            activityCollector,
+            inputProvider,
+            sessionCollector,
+            samplingIntervalSeconds: 10,
+            batchIntervalSeconds: 60,
+            NullLogger<MonitoringService>.Instance,
+            appCollector);
+
+        RemoteWork.Desktop.Core.Models.ApplicationActivity? flushedApp = null;
+        monitoringService.OnApplicationActivityGenerated += app => flushedApp = app;
+
+        using var cts = new CancellationTokenSource();
+        await monitoringService.StartAsync(cts.Token);
+        await monitoringService.StopAsync(CancellationToken.None);
+
+        Assert.NotNull(flushedApp);
+        Assert.Equal("VS Code", flushedApp.ApplicationName);
+        Assert.Equal("Code", flushedApp.ProcessName);
+        Assert.Equal(42, flushedApp.ProcessId);
+        Assert.True(flushedApp.Duration > TimeSpan.Zero);
+    }
+
+    private sealed class MockAppProvider : IApplicationActivityProvider
+    {
+        public ActiveApplicationInfo? App { get; set; }
+        public ActiveApplicationInfo? GetActiveApplication() => App;
+    }
 }

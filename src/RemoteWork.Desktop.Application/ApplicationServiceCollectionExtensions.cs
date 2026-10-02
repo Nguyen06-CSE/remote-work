@@ -49,12 +49,14 @@ public static class ApplicationServiceCollectionExtensions
         services.AddSingleton<IMouseActivityCollector, MouseActivityCollector>();
         services.AddSingleton<IMouseBotDetector, MouseBotDetector>();
         services.AddSingleton<IActivityCollector, ActivityCollector>();
+        services.AddSingleton<IApplicationActivityCollector, ApplicationActivityCollector>();
 
         services.AddSingleton<IMonitoringService>(sp =>
         {
             var activityCollector = sp.GetRequiredService<IActivityCollector>();
             var inputProvider = sp.GetRequiredService<IInputActivityProvider>();
             var sessionCollector = sp.GetRequiredService<ISessionCollector>();
+            var appCollector = sp.GetService<IApplicationActivityCollector>();
             var options = sp.GetService<IOptions<TrackingOptions>>()?.Value ?? new TrackingOptions();
             var logger = sp.GetRequiredService<ILogger<MonitoringService>>();
 
@@ -64,7 +66,8 @@ public static class ApplicationServiceCollectionExtensions
                 sessionCollector,
                 options.ActivitySamplingIntervalSeconds,
                 options.ActivityBatchIntervalSeconds,
-                logger);
+                logger,
+                appCollector);
         });
 
         services.AddSingleton<MonitoringService>(sp => (MonitoringService)sp.GetRequiredService<IMonitoringService>());

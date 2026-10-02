@@ -12,7 +12,9 @@ public static class MacOsServiceCollectionExtensions
         services.AddSingleton<IIdleTimeProvider>(sp => sp.GetRequiredService<MacOsIdleTimeProvider>());
         services.AddSingleton<IIdleProvider>(sp => sp.GetRequiredService<MacOsIdleTimeProvider>());
         services.AddSingleton<IInputActivityProvider, MacOsInputActivityProvider>();
-        services.AddSingleton<IActiveApplicationProvider, MacOsActiveApplicationProvider>();
+        services.AddSingleton<MacOsActiveApplicationProvider>();
+        services.AddSingleton<IApplicationActivityProvider>(sp => sp.GetRequiredService<MacOsActiveApplicationProvider>());
+        services.AddSingleton<IActiveApplicationProvider>(sp => sp.GetRequiredService<MacOsActiveApplicationProvider>());
         services.AddSingleton<IPlatformPermissionProvider, MacOsPlatformPermissionProvider>();
         services.AddSingleton<IScreenshotProvider, MacOsScreenshotProvider>();
         return services;

@@ -14,15 +14,26 @@ public sealed class TrackingPersistenceCoordinator
 {
     private readonly IActivityBatchRepository _batchRepository;
     private readonly ISyncQueueRepository _syncQueueRepository;
+    private readonly IApplicationActivityRepository? _appActivityRepository;
     private readonly ILogger<TrackingPersistenceCoordinator> _logger;
 
     public TrackingPersistenceCoordinator(
         IActivityBatchRepository batchRepository,
         ISyncQueueRepository syncQueueRepository,
         ILogger<TrackingPersistenceCoordinator> logger)
+        : this(batchRepository, syncQueueRepository, null, logger)
+    {
+    }
+
+    public TrackingPersistenceCoordinator(
+        IActivityBatchRepository batchRepository,
+        ISyncQueueRepository syncQueueRepository,
+        IApplicationActivityRepository? appActivityRepository,
+        ILogger<TrackingPersistenceCoordinator> logger)
     {
         _batchRepository = batchRepository;
         _syncQueueRepository = syncQueueRepository;
+        _appActivityRepository = appActivityRepository;
         _logger = logger;
     }
 
@@ -79,5 +90,35 @@ public sealed class TrackingPersistenceCoordinator
         };
 
         return await _syncQueueRepository.EnqueueIfNotExistsAsync(queueItem, ct);
+    }
+
+    /// <summary>
+    /// Persists an ApplicationActivity to local SQLite and enqueues it for background synchronization.
+    /// </summary>
+    public async Task<bool> PersistAndEnqueueApplicationActivityAsync(ApplicationActivity activity, CancellationToken ct = default)
+    {
+        if (_appActivityRepository is not null)
+        {
+            await _appActivityRepository.SaveAsync(activity, ct);
+            _logger.LogInformation("Saved ApplicationActivity {ActivityId} ({AppName}) to local SQLite.", activity.ActivityId, activity.ApplicationName);
+        }
+
+        var payload = JsonSerializer.Serialize(activity);
+        var queueItem = new SyncQueueItem
+        {
+            QueueItemId = Guid.NewGuid().ToString("D"),
+            EntityType = "ApplicationActivity",
+            EntityId = activity.ActivityId,
+            PayloadJson = payload,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        var enqueued = await _syncQueueRepository.EnqueueIfNotExistsAsync(queueItem, ct);
+        if (enqueued)
+        {
+            _logger.LogInformation("Enqueued ApplicationActivity {ActivityId} ({AppName}) to sync queue.", activity.ActivityId, activity.ApplicationName);
+        }
+
+        return enqueued;
     }
 }

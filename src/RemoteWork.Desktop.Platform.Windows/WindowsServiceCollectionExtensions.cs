@@ -12,7 +12,9 @@ public static class WindowsServiceCollectionExtensions
         services.AddSingleton<IIdleTimeProvider>(sp => sp.GetRequiredService<WindowsIdleTimeProvider>());
         services.AddSingleton<IIdleProvider>(sp => sp.GetRequiredService<WindowsIdleTimeProvider>());
         services.AddSingleton<IInputActivityProvider, WindowsInputActivityProvider>();
-        services.AddSingleton<IActiveApplicationProvider, WindowsActiveApplicationProvider>();
+        services.AddSingleton<WindowsActiveApplicationProvider>();
+        services.AddSingleton<IApplicationActivityProvider>(sp => sp.GetRequiredService<WindowsActiveApplicationProvider>());
+        services.AddSingleton<IActiveApplicationProvider>(sp => sp.GetRequiredService<WindowsActiveApplicationProvider>());
         services.AddSingleton<IPlatformPermissionProvider, WindowsPlatformPermissionProvider>();
         services.AddSingleton<IScreenshotProvider, WindowsScreenshotProvider>();
         return services;

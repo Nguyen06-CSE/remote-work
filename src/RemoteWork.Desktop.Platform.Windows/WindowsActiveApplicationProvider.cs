@@ -30,21 +30,12 @@ public sealed class WindowsActiveApplicationProvider : IActiveApplicationProvide
 
             using var process = Process.GetProcessById((int)pid);
 
-            var titleLen = GetWindowTextLength(hwnd);
-            var title = string.Empty;
-            if (titleLen > 0)
-            {
-                var sb = new StringBuilder(titleLen + 1);
-                GetWindowText(hwnd, sb, sb.Capacity);
-                title = sb.ToString();
-            }
-
             return new ActiveApplicationInfo
             {
-                ApplicationName = process.MainWindowTitle.Length > 0 ? process.MainWindowTitle : process.ProcessName,
+                ApplicationName = process.ProcessName,
                 ProcessName = process.ProcessName,
                 ProcessId = (int)pid,
-                WindowTitle = title,
+                WindowTitle = string.Empty, // Deliberately omitted: avoid leaking URLs, file titles, or search queries
                 Timestamp = DateTimeOffset.UtcNow
             };
         }
