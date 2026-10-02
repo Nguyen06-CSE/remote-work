@@ -71,7 +71,11 @@ public static class ApplicationServiceCollectionExtensions
 
         // Offline-first Sync and Persistence services
         services.AddScoped<TrackingPersistenceCoordinator>();
-        services.AddSingleton<ISyncEngine, SyncEngine>();
+        services.AddSingleton<ISyncEngine>(sp => new SyncEngine(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            sp.GetRequiredService<ISyncTransport>(),
+            sp.GetRequiredService<IOptions<SyncOptions>>(),
+            sp.GetRequiredService<ILogger<SyncEngine>>()));
         services.AddSingleton<SyncEngine>(sp => (SyncEngine)sp.GetRequiredService<ISyncEngine>());
 
         return services;

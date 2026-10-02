@@ -166,3 +166,49 @@ Nếu triển khai trên máy cấu hình thấp (RAM 4 GB, CPU 2 cores), điề
 | Ăn bao nhiêu CPU? | **~0% khi idle**, ~0.1% khi có tương tác |
 | Có rò rỉ bộ nhớ không? | **Không** (Gen2 GC = 0) |
 | Có ổn với yêu cầu không? | **Có** — dưới ngưỡng 40 MB, sẵn sàng cho SQLite + Screenshot phase tiếp theo |
+
+
+## Phase 07 — Local SQLite Persistence (macOS)
+
+**Ngày đo:** 2026-10-02
+**Session:** 3c1ea66b-f97a-45ff-a4b2-f48fc0b9d941
+**Công cụ:** `ps -o rss` sau khi app chạy ổn định (SQLite đã migrate xong)
+
+| Chỉ số | Giá trị | Budget | Đạt? |
+|---|---|---|---|
+| **RSS (RAM)** | **72.2 MB** (73,968 KB) | < 60 MB | ❌ **Vượt 12 MB** |
+| **%CPU** | 0.0% | < 0.5% | ✅ |
+| **%MEM** | 0.2% | — | ✅ |
+| **Assembly count** | 83–143 | — | ⚠️ Tăng do EF Core |
+
+### Giải thích mức tăng
+
+| Thành phần | Ước tính |
+|---|---|
+| Phase 06 baseline | ~34 MB |
+| + EF Core meta model + change tracker | ~15–20 MB |
+| + SQLite native lib (`e_sqlite3`) | ~5–8 MB |
+| + Migration + DB connection pool | ~5–10 MB |
+| + .NET runtime overhead cho EF types | ~5 MB |
+| **Phase 07 tổng** | **~72 MB** |
+
+### Khuyến nghị giảm RAM (chưa implement)
+
+1. **WAL mode** — giảm I/O contention, không tăng RAM nhưng cải thiện throughput
+2. **`QueryTrackingBehavior.NoTracking`** globally cho read-only queries → giảm change tracker overhead ~5–10 MB
+3. **`AddDbContextPool`** thay vì `AddDbContext` → tái dùng context, giảm allocation
+4. **Retention policy** — xoá batch cũ > N ngày khỏi SQLite → giảm disk, không giảm RAM nhưng cần cho long-run
+5. **Lazy loading** — đảm bảo tắt (`UseLazyLoadingProxies` mặc định off) → đang đúng
+6. **Chỉ giữ DbContext scoped khi cần** — hiện tại đã scoped ✅
+
+### Cập nhật Budget thực tế
+
+| Phase | Budget gốc | Thực tế | Chênh lệch |
+|---|---|---|---|
+| Phase 01 | < 35 MB | 25.5 MB | ✅ |
+| Phase 05 | < 40 MB | 33.8 MB | ✅ |
+| Phase 06 | (không thêm) | ~34 MB | ✅ |
+| **Phase 07** | **< 60 MB** | **72.2 MB** | ❌ **+12 MB** |
+| Phase 08 (sync) | < 100 MB | — | ⏳ |
+
+**Kết luận:** SQLite + EF Core tốn RAM nhiều hơn dự kiến. **Cần optimization phase trước khi thêm sync layer**, nếu không sẽ vượt 100 MB ở Phase 08.

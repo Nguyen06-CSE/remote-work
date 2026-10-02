@@ -71,6 +71,7 @@ public sealed class SyncEngine : ISyncEngine, IDisposable
         _logger = logger;
     }
 
+    [ActivatorUtilitiesConstructor]
     public SyncEngine(
         IServiceScopeFactory scopeFactory,
         ISyncTransport transport,
