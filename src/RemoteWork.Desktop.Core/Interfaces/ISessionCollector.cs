@@ -2,11 +2,7 @@ using RemoteWork.Desktop.Core.Models;
 
 namespace RemoteWork.Desktop.Core.Interfaces;
 
-public interface ISessionCollector
+public interface ISessionCollector : ISessionEngine
 {
-    SessionInfo StartSession(string deviceId);
-
-    void EndSession();
-
-    SessionInfo? GetCurrentSession();
+    new SessionInfo? EndSession();
 }

@@ -23,7 +23,9 @@ public static class ApplicationServiceCollectionExtensions
 
         services.AddSingleton<AgentRuntimeState>();
         services.AddSingleton<DeviceCollector>();
-        services.AddSingleton<ISessionCollector, SessionCollector>();
+        services.AddSingleton<SessionEngine>();
+        services.AddSingleton<ISessionEngine>(sp => sp.GetRequiredService<SessionEngine>());
+        services.AddSingleton<ISessionCollector>(sp => sp.GetRequiredService<SessionEngine>());
 
         services.AddSingleton<IIdleActivityCollector>(sp =>
         {
