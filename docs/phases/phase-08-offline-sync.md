@@ -63,6 +63,13 @@ The tracking system must never depend on an active network connection.
 - Subscribed `_monitoringService.OnBatchGenerated` to `TrackingPersistenceCoordinator.PersistAndEnqueueBatchAsync`.
 - Lifecycle-managed `_syncEngine.StartAsync` and `StopAsync`.
 
+### 2.6 Production Wiring Fix (SQLite Foreign Key Constraints)
+During live runtime verification of the Host, inserting an `ActivityBatch` failed with SQLite Error 19 (`FOREIGN KEY constraint failed`) because `Device` and `Session` were created in memory but never persisted before batches were emitted.
+- In `Worker.cs`, added startup persistence of `Device` via `IDeviceRepository.UpsertAsync` and `Session` via `ISessionRepository.SaveAsync` prior to starting `MonitoringService`.
+- Added shutdown persistence in `Worker.cs` finally block to persist `EndedAt` and `Status = Ended` via `ISessionRepository.UpdateAsync`.
+- Added `ForeignKeyConstraintTests.cs` verifying foreign key enforcement and end-to-end persistence.
+- Documented root cause and solution in `docs/troubleshooting/sqlite-fk-constraint-failed.md`.
+
 ---
 
 ## 3. Architecture Decisions
@@ -82,7 +89,7 @@ If the host process is killed while an upload is in flight, the items remain in 
 
 ## 4. Files Created & Modified
 
-### Created (7 files):
+### Created (9 files):
 1. `src/RemoteWork.Desktop.Core/Enums/SyncStatus.cs`
 2. `src/RemoteWork.Desktop.Core/Models/SyncResult.cs`
 3. `src/RemoteWork.Desktop.Core/Interfaces/ISyncTransport.cs`
@@ -94,9 +101,11 @@ If the host process is killed while an upload is in flight, the items remain in 
 9. `src/RemoteWork.Desktop.Persistence/Data/Migrations/20261002140553_AddOfflineSyncQueueFields.cs`
 10. `tests/RemoteWork.Desktop.UnitTests/Core/SyncQueueItemStateTransitionTests.cs`
 11. `tests/RemoteWork.Desktop.IntegrationTests/Sync/SyncEngineIntegrationTests.cs`
-12. `docs/architecture/offline-sync.md`
-13. `docs/phases/phase-08-offline-sync.md`
-14. `docs/troubleshooting/sync-failures.md`
+12. `tests/RemoteWork.Desktop.IntegrationTests/Persistence/ForeignKeyConstraintTests.cs`
+13. `docs/architecture/offline-sync.md`
+14. `docs/phases/phase-08-offline-sync.md`
+15. `docs/troubleshooting/sync-failures.md`
+16. `docs/troubleshooting/sqlite-fk-constraint-failed.md`
 
 ### Modified (7 files):
 1. `src/RemoteWork.Desktop.Core/Models/SyncQueueItem.cs`
@@ -128,10 +137,19 @@ All 9 required simulations and the offline tracking pipeline were implemented in
 | `Scenario9_Cancellation_During_Sync` | Graceful abort on `CancellationToken` cancellation | PASS |
 | `Scenario10_Tracking_And_Persistence_Pipeline_Works_Offline` | Full pipeline collects and stores data while transport is offline | PASS |
 
+### Foreign Key & Pipeline Constraint Tests (`ForeignKeyConstraintTests.cs`):
+| Test Name | Scenario Tested | Result |
+|---|---|---|
+| `Device_Session_ActivityBatch_Insertion_Succeeds_When_ForeignKeys_Exist` | Verifies parent entity creation satisfies FKs | PASS |
+| `ActivityBatch_Insertion_Throws_SqliteException_When_Session_Does_Not_Exist` | Verifies SQLite Error 19 on missing Session | PASS |
+| `ActivityBatch_Insertion_Throws_SqliteException_When_Device_Does_Not_Exist` | Verifies SQLite Error 19 on missing Device | PASS |
+| `TrackingPersistenceCoordinator_With_Startup_Persisted_Device_And_Session_Succeeds` | Verifies end-to-end coordinator batch saving & queuing | PASS |
+| `Session_Shutdown_Update_Persists_EndedAt_And_Status_Across_Restart` | Verifies session end time & status persist across restart | PASS |
+
 ### Test Suite Execution Summary:
 - **Unit Tests:** 95 passed (0 failed, 0 skipped)
-- **Integration Tests:** 65 passed (0 failed, 0 skipped)
-- **Total:** 160 passed (100% green, ~2s runtime)
+- **Integration Tests:** 70 passed (0 failed, 0 skipped)
+- **Total:** 165 passed (100% green, ~2s runtime)
 
 ---
 
@@ -169,7 +187,7 @@ All 9 required simulations and the offline tracking pipeline were implemented in
 - [x] Retry works (verified in `Scenario4`)
 - [x] Duplicate prevention exists (verified in `Scenario7`)
 - [x] Restart recovery works (verified in `Scenario5`)
-- [x] Tests pass (160/160 passing)
+- [x] Tests pass (165/165 passing)
 - [x] No FastAPI implementation yet (`InMemorySyncTransport` used)
-- [x] Docs complete (`offline-sync.md`, `phase-08-offline-sync.md`, `sync-failures.md`)
+- [x] Docs complete (`offline-sync.md`, `phase-08-offline-sync.md`, `sync-failures.md`, `sqlite-fk-constraint-failed.md`)
 - [x] Commit created

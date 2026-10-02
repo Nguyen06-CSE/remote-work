@@ -66,6 +66,16 @@ public sealed class Worker : BackgroundService
             var session = _sessionCollector.StartSession(device.DeviceId);
             _logger.LogInformation("Current session: {SessionId}", session.SessionId);
 
+            // Persist Device and Session to SQLite so that foreign keys in ActivityBatches are satisfied
+            using (var scope = _scopeFactory.CreateScope())
+            {
+                var deviceRepo = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
+                var sessionRepo = scope.ServiceProvider.GetRequiredService<ISessionRepository>();
+                await deviceRepo.UpsertAsync(device, stoppingToken);
+                await sessionRepo.SaveAsync(session, stoppingToken);
+                _logger.LogInformation("Persisted initial Device {DeviceId} and Session {SessionId} to SQLite.", device.DeviceId, session.SessionId);
+            }
+
             // 3. Chuyển state sang Running
             _state.MarkRunning();
             _logger.LogInformation("Agent status: {Status}", _state.Status);
@@ -112,7 +122,22 @@ public sealed class Worker : BackgroundService
 
             await _syncEngine.StopAsync(CancellationToken.None);
             await _monitoringService.StopAsync(CancellationToken.None);
-            _sessionCollector.EndSession();
+            var endedSession = _sessionCollector.EndSession();
+
+            if (endedSession != null)
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var sessionRepo = scope.ServiceProvider.GetRequiredService<ISessionRepository>();
+                    await sessionRepo.UpdateAsync(endedSession, CancellationToken.None);
+                    _logger.LogInformation("Updated ended Session {SessionId} in SQLite.", endedSession.SessionId);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to update ended Session {SessionId} in SQLite.", endedSession.SessionId);
+                }
+            }
 
             _state.MarkStopped();
             _logger.LogInformation("Agent status: {Status}", _state.Status);
