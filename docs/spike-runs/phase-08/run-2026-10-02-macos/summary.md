@@ -1,114 +1,126 @@
-# Spike Run Summary: Phase 08 Runtime Verification on macOS
+# Phase 08 — Run Summary (macOS)
 
-**Date:** 2026-10-02  
-**Host Machine:** macOS (Darwin 26.5.1 / ARM64)  
-**Binary Tested:** `src/RemoteWork.Desktop.Host` (.NET 10.0)  
-**Database Path:** `~/Library/Application Support/RemoteWork/Agent/remotework.db`
+## 📌 Metadata
+- **Ngày chạy:** 2026-10-02
+- **Máy:** MacBook-Pro-2 (macOS 26.5.1)
+- **App Version:** 1.0.0-dev
+- **Device ID:** `9a14dc23-27c1-455a-96cf-41c495b987b0`
+- **Session ID:** `e4684cd6-c685-41bf-b200-6009983c1844`
+- **StartedAt (UTC):** 10/02/2026 14:29:30 (+00:00)
+- **EndedAt (UTC):**   10/02/2026 14:32:59 (+00:00)
+- **Duration:** 00:03:29.2227500
+- **Backend:** `http://localhost:8000` (không có FastAPI chạy — test offline via `InMemorySyncTransport`)
 
----
+## 🎯 Mục tiêu kiểm tra (Objective)
+- [x] Device + Session persisted **trước** khi batch insert (fix Phase 08)
+- [x] ActivityBatch persist thành công, không FK fail
+- [x] SyncQueue enqueue thành công
+- [x] SyncEngine thực sự sync batch (20/22 đã synced qua `InMemorySyncTransport`)
+- [x] Session cập nhật `EndedAt` + `Status=Ended` khi shutdown
+- [x] Final batch flush on shutdown
+- [x] Idle transition ghi nhận (`Active: True → False → True`)
+- [x] Tests: 165/165 pass
 
-## 1. Objective
+## 🆕 Điểm mới so với Phase 07
 
-Verify the complete runtime pipeline of RemoteWork Desktop Agent on macOS after resolving the SQLite Foreign Key constraint failure:
-```
-Collector -> SQLite (Device, Session, ActivityBatch) -> SyncQueue -> SyncEngine (InMemorySyncTransport)
-```
+| Thay đổi | Phase 07 | Phase 08 |
+|---|---|---|
+| Device persisted | ❌ Chưa wire | ✅ `UPDATE "Devices"` upsert |
+| Session persisted | ❌ Chưa wire | ✅ `INSERT INTO "Sessions"` |
+| ActivityBatch persist | ❌ FK fail | ✅ `INSERT` thành công |
+| SyncQueue enqueue | Không có | ✅ 22 items |
+| SyncEngine | Không có | ✅ 20 Synced / 2 Pending |
+| Session close update | Không có | ✅ `UPDATE "Sessions" SET EndedAt` |
 
----
-
-## 2. Execution Log Excerpts
+## 📋 Log Highlights
 
 ```text
-info: RemoteWork.Desktop.Persistence.Data.DatabaseInitializer[0]
-      Applying database migrations...
-info: Microsoft.EntityFrameworkCore.Migrations[20405]
-      No migrations were applied. The database is already up to date.
-info: RemoteWork.Desktop.Persistence.Data.DatabaseInitializer[0]
-      Database ready.
-info: RemoteWork.Desktop.Host.Worker[0]
-      RemoteWork Desktop Host starting...
-info: RemoteWork.Desktop.Host.Worker[0]
-      Agent version: 1.0.0
-info: RemoteWork.Desktop.Host.Worker[0]
-      Environment: Development
-info: RemoteWork.Desktop.Host.Worker[0]
-      Backend: http://localhost:8000
-info: RemoteWork.Desktop.Application.Collectors.DeviceCollector[0]
-      Device detected: 9a14dc23-27c1-455a-96cf-41c495b987b0, Hostname: MacBook-Pro-2, OS: macOS
-info: RemoteWork.Desktop.Application.Collectors.SessionEngine[0]
-      Session started. SessionId: 84f6147d-003a-4bf9-ab74-3b8c006b7777, DeviceId: 9a14dc23-27c1-455a-96cf-41c495b987b0
-info: RemoteWork.Desktop.Host.Worker[0]
-      Persisted initial Device 9a14dc23-27c1-455a-96cf-41c495b987b0 and Session 84f6147d-003a-4bf9-ab74-3b8c006b7777 to SQLite.
-info: RemoteWork.Desktop.Host.Worker[0]
-      Agent status: Running
-info: RemoteWork.Desktop.Application.Monitoring.MonitoringService[0]
-      Input activity provider started.
-info: RemoteWork.Desktop.Application.Sync.SyncEngine[0]
-      Starting offline-first SyncEngine...
-info: RemoteWork.Desktop.Application.Sync.TrackingPersistenceCoordinator[0]
-      Saved ActivityBatch e2a4ee7c-8f26-47a8-9d10-05e8940b0f7d to local SQLite.
-info: RemoteWork.Desktop.Application.Sync.TrackingPersistenceCoordinator[0]
-      Enqueued ActivityBatch e2a4ee7c-8f26-47a8-9d10-05e8940b0f7d to sync queue.
-info: RemoteWork.Desktop.Application.Sync.SyncEngine[0]
-      Processing 1 eligible sync queue items...
-info: RemoteWork.Desktop.Application.Sync.SyncEngine[0]
-      Sync batch completed: 1/1 synced successfully.
+[Startup]
+Database ready.
+Session started. SessionId: e4684cd6-..., StartedAt: 10/02/2026 14:29:30 +00:00
+UPDATE "Devices" SET "AgentVersion"=..., "LastSeenAt"=... WHERE "DeviceId"=...
+INSERT INTO "Sessions" ("SessionId", "DeviceId", "EndedAt", "StartedAt", "Status") VALUES (...)
+Persisted initial Device 9a14dc23-... and Session e4684cd6-... to SQLite.
+Input activity provider started.
+Starting offline-first SyncEngine...
+
+[Tracking]
+Activity batch created. BatchId=87c1a75b-..., Keyboard=4, Mouse=40, Active=00:00:07.99, Idle=00:00:00
+INSERT INTO "ActivityBatches" (...) VALUES (...)
+Saved ActivityBatch 87c1a75b-... to local SQLite.
+INSERT INTO "SyncQueue" (...) VALUES (...)
+Enqueued ActivityBatch 87c1a75b-... to sync queue.
+Sync batch completed: 2/2 synced successfully.
+Activity: ActivityStateChanged | ... | Active: False    ← idle transition
+Activity: ActivityStateChanged | ... | Active: True     ← resume
+Activity batch created. BatchId=1e75fc4b-..., Keyboard=0, Mouse=238, Active=00:00:06.00, Idle=00:00:05.99
+
+[Shutdown]
+Stopping SyncEngine...
+SyncEngine stopped.
+Final activity batch flushed on shutdown. BatchId=302accee-..., Keyboard=1, Mouse=67, Active=00:00:02.94
+Saved ActivityBatch 302accee-... to local SQLite.
+Enqueued ActivityBatch 302accee-... to sync queue.
+Input activity provider stopped.
+Session ended. SessionId: e4684cd6-..., Duration: 00:03:29.2227500, EndedAt: 10/02/2026 14:32:59 +00:00
+UPDATE "Sessions" SET "EndedAt"=@p0, "Status"=@p1 WHERE "SessionId"=@p2
+Updated ended Session e4684cd6-... in SQLite.
+Agent status: Stopped
 ```
 
----
-
-## 3. SQLite Database Verification
-
-Ran direct SQLite queries against the database on disk:
+## 📊 SQLite verification
 
 ```bash
-sqlite3 ~/Library/Application\ Support/RemoteWork/Agent/remotework.db \
-  "SELECT 'Devices', COUNT(*) FROM Devices UNION ALL \
-   SELECT 'Sessions', COUNT(*) FROM Sessions UNION ALL \
-   SELECT 'ActivityBatches', COUNT(*) FROM ActivityBatches UNION ALL \
-   SELECT 'SyncQueue', COUNT(*) FROM SyncQueue;"
+sqlite3 ~/Library/Application\ Support/RemoteWork/Agent/remotework.db
 ```
 
-### Output:
+| Query | Kết quả |
+|---|---|
+| `SELECT COUNT(*) FROM Devices` | 1 |
+| `SELECT COUNT(*) FROM Sessions` | 3 |
+| `SELECT COUNT(*) FROM Sessions WHERE EndedAt IS NOT NULL` | 1 |
+| `SELECT COUNT(*) FROM ActivityBatches` | 22 |
+| `SELECT COUNT(*) FROM SyncQueue` | 22 |
+| `SELECT Status, COUNT(*) FROM SyncQueue GROUP BY Status` | Synced=20, Pending=2 |
+
+**Kết luận:** Pipeline hoạt động end-to-end. 20/22 batch đã sync thành công qua `InMemorySyncTransport`. 2 batch cuối vẫn Pending do shutdown ngay sau khi enqueue — behavior hợp lý.
+
+## 🧪 Test results
 ```text
-Devices|1
-Sessions|2
-ActivityBatches|3
-SyncQueue|3
+RemoteWork.Desktop.UnitTests:         95 passed (0 failed, 1s)
+RemoteWork.Desktop.IntegrationTests:  70 passed (0 failed, 741ms)
+Total: 165 passed
 ```
+*Lưu ý:* Phase 08 doc ghi 160 test → thực tế là 165 (tăng 5 test cho fix FK constraint).
 
-### Table Records Breakdown:
+## 🔍 Đối chiếu với Phase 07
 
-#### 1. `Devices` Table
-| DeviceId | Hostname | OperatingSystem | OsVersion | AgentVersion |
-|---|---|---|---|---|
-| `9a14dc23-27c1-455a-96cf-41c495b987b0` | `MacBook-Pro-2` | `macOS` | `26.5.1` | `1.0.0-dev` |
-
-#### 2. `Sessions` Table
-| SessionId | DeviceId | Status |
+| Thuộc tính | Phase 07 | Phase 08 |
 |---|---|---|
-| `4fbdf4c7-71e5-44f3-9c93-5e30a16a1369` | `9a14dc23-27c1-455a-96cf-41c495b987b0` | `Active` |
-| `84f6147d-003a-4bf9-ab74-3b8c006b7777` | `9a14dc23-27c1-455a-96cf-41c495b987b0` | `Active` |
+| **SessionId** | `3c1ea66b-...` | `e4684cd6-...` |
+| **DeviceId** | `9a14dc23-...` | `9a14dc23-...` (stable) ✅ |
+| **FK constraint** | ❌ Fail | ✅ Pass |
+| **ActivityBatches trong DB** | 0 (fail) | 22 ✅ |
+| **RAM** | ~72 MB | ~95 MB |
+| **Gen2 GC** | 0 | 1 |
 
-#### 3. `ActivityBatches` Table
-| BatchId | DeviceId | SessionId | KeyboardCount | MouseCount | ActiveDurationTicks | IdleDurationTicks |
-|---|---|---|---|---|---|---|
-| `e2a4ee7c-8f26-47a8-9d10-05e8940b0f7d` | `9a14dc23-27c1...` | `4fbdf4c7-71e5...` | 0 | 0 | 79925850 | 0 |
-| `1c12f5fa-a9dd-46d0-86b8-597de07a9d6b` | `9a14dc23-27c1...` | `4fbdf4c7-71e5...` | 0 | 0 | 119980370 | 0 |
-| `320814c7-c189-4aaa-a580-e50194a6c593` | `9a14dc23-27c1...` | `4fbdf4c7-71e5...` | 0 | 0 | 60001460 | 40002720 |
+## ✅ Đối chiếu Definition of Done (Phase 08)
 
-#### 4. `SyncQueue` Table
-| QueueItemId | EntityType | EntityId | Status | AttemptCount |
-|---|---|---|---|---|
-| `ce97f047-a4ab-4d86-bd97-d546b56c5e81` | `ActivityBatch` | `e2a4ee7c-8f26-47a8-9d10-05e8940b0f7d` | `Synced` | 1 |
-| `6408e786-4922-413f-b1fa-e857e8a62edb` | `ActivityBatch` | `1c12f5fa-a9dd-46d0-86b8-597de07a9d6b` | `Synced` | 1 |
-| `2b62695a-eeae-48bc-a086-3585f7c085e5` | `ActivityBatch` | `320814c7-c189-4aaa-a580-e50194a6c593` | `Synced` | 1 |
+| Item | Trạng thái |
+|---|---|
+| Tracking works offline | ✅ (InMemorySyncTransport 20 synced) |
+| Queue persists | ✅ 22 items trong SyncQueue |
+| Retry works | ✅ (đã cover trong test `Scenario4_Retry`) |
+| Duplicate prevention exists | ✅ (`EnqueueIfNotExistsAsync` với `SELECT EXISTS`) |
+| Restart recovery works | ✅ (`ResetInProgressToPendingAsync` chạy đầu mỗi SyncEngine start) |
+| Tests pass | ✅ 165/165 |
+| No FastAPI implementation | ✅ (`InMemorySyncTransport`) |
+| Docs complete | ✅ 3 files: phase-08, offline-sync, troubleshooting |
+| Commit created | ⏳ (chưa có hash) |
 
----
+## 📝 Ghi chú
+Phase 08 hoàn thành mục tiêu offline-first: dữ liệu tracking chảy vào SQLite + SyncQueue mà không phụ thuộc backend. Khi có backend thật (Phase 12), chỉ cần thay `InMemorySyncTransport` bằng `FastApiSyncTransport` — domain và pipeline không đổi.
 
-## 4. Conclusion
-
-- Foreign key constraints between `ActivityBatches` -> `Devices` & `Sessions` are satisfied by persisting `Device` and `Session` at startup in `Worker.cs`.
-- All activity batches save to SQLite without error.
-- All offline sync queue items are enqueued and processed successfully by `SyncEngine`.
-- The live agent runtime is completely stable and operational.
+**Vấn đề cần theo dõi:**
+- **RAM tăng 23 MB** so với Phase 07 (72 → 95 MB). Nguyên nhân: EF Core query cache + SyncEngine state + change tracker. Còn 5 MB headroom trước budget 100 MB.
+- **Gen2 GC = 1** lần đầu xuất hiện. Không phải red flag nhưng cần theo dõi ở Phase 09/10.

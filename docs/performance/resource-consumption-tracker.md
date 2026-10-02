@@ -90,19 +90,135 @@ Tài liệu này trả lời một câu hỏi duy nhất:
 
 ---
 
-## 5. Ngân sách cho các Phase tiếp theo
+## 5. Phase 07 — Local SQLite Persistence (macOS)
 
-| Phase | Chức năng thêm | RAM budget | CPU budget | Trạng thái |
-|---|---|---|---|---|
-| Phase 01 | Session Engine + Hooks cơ bản | < 35 MB | < 0.5% | ✅ Đạt (25.5 MB) |
-| Phase 05 | Activity Engine (macOS + Windows) | < 40 MB | < 1.0% | ✅ Đạt (33.8 MB) |
-| Phase 06 (dự kiến) | + SQLite / EF Core Local Storage | < 60 MB | < 2.0% | ⏳ Chờ đo |
-| Phase 07 (dự kiến) | + Screenshot Engine | < 85 MB | < 4.0% | ⏳ Chờ đo |
-| Phase 08 (dự kiến) | + Offline Sync Queue | < 100 MB | < 3.0% | ⏳ Chờ đo |
+**Ngày đo:** 2026-10-02
+**Session:** 3c1ea66b-f97a-45ff-a4b2-f48fc0b9d941
+**Công cụ:** `ps -o rss`
+
+| Chỉ số | Giá trị | Budget | Đạt? |
+|---|---|---|---|
+| RSS (RAM) | **72.2 MB** | < 60 MB | ❌ vượt 12 MB |
+| %CPU | 0.0% | < 0.5% | ✅ |
+| Gen2 GC | 0 | 0 | ✅ |
+
+**Tăng do:** EF Core meta model + change tracker + SQLite native lib.
+**Chi tiết:** `docs/phases/phase-07-local-persistence.md`.
 
 ---
 
-## 6. Cách đo lại (Runbook)
+## 6. Phase 08 — Offline-First Sync Engine (macOS)
+
+**Ngày đo:** 2026-10-02
+**Session:** e4684cd6-c685-41bf-b200-6009983c1844
+**Công cụ:** `ps -o rss` + `dotnet-counters`
+
+| Chỉ số | Giá trị | Budget | Đạt? |
+|---|---|---|---|
+| **RSS (RAM)** | **95.1 MB** (97,360 KB) | < 100 MB | ⚠️ **Sát budget (+5 MB headroom)** |
+| **%CPU** | 0.5% | < 2.0% | ✅ |
+| **Gen2 GC** | **1** | 0 | ⚠️ **Lần đầu xuất hiện** |
+| **Assembly count** | 86 | — | +3 so với Phase 07 |
+| **Total allocated** | 29 MB | — | — |
+
+### Giải thích mức tăng so với Phase 07
+
+| Thành phần | Δ ước tính |
+|---|---|
+| EF Core query compile cache (SyncQueue queries) | +5–8 MB |
+| SyncEngine state (polling loop, backoff state) | +3–5 MB |
+| Change tracker cho SyncQueueItemEntity | +5–8 MB |
+| Startup persistence (Device + Session repo) | +2–3 MB |
+| **Tổng** | **+22–23 MB** |
+
+### ⚠️ Cảnh báo
+
+1. **RAM còn 5 MB headroom** trước budget 100 MB → **Phase 09 (Application Tracking) + Phase 10 (Screenshot) sẽ vượt** nếu không optimize.
+
+2. **Gen2 GC xuất hiện lần đầu (1 lần)** trong session 3.5 phút. Không phải red flag ngay, nhưng:
+   - Nếu Gen2 tăng **đều đặn** trong Phase 09 → có memory leak tiềm ẩn cần điều tra.
+   - Nếu Gen2 vẫn ổn định (1–2 lần/session) → chấp nhận được.
+
+### Khuyến nghị optimization (trước Phase 09)
+
+1. **`AddDbContextPool`** thay `AddDbContext` — tái dùng context instance, giảm allocation.
+2. **`QueryTrackingBehavior.NoTracking`** cho query read-only (SyncQueue eligibility check).
+3. **WAL mode** cho SQLite để giảm I/O contention.
+4. **Retention policy** — xoá `Synced` items khỏi SyncQueue sau N ngày, giảm bảng size.
+5. **`DeleteSentAsync` chạy định kỳ** — hiện có method nhưng chưa schedule.
+
+### Budget cập nhật
+
+| Phase | Budget gốc | Thực tế | Δ |
+|---|---|---|---|
+| Phase 01 | < 35 MB | 25.5 MB | ✅ |
+| Phase 05 | < 40 MB | 33.8 MB | ✅ |
+| Phase 06 | — | ~34 MB | ✅ |
+| Phase 07 | < 60 MB | 72.2 MB | ❌ +12 MB |
+| Phase 08 | < 100 MB | 95.1 MB | ⚠️ +0 (sát ngưỡng) |
+| **Phase 09** | **< 100 MB** | **123 MB** | ❌ **+23 MB** (chi tiết ở mục 7) |
+| Phase 10 | cần optimize trước | — | ⚠️ |
+
+---
+
+## 7. Phase 09 — Application Activity Tracking (macOS)
+
+**Ngày đo:** 2026-10-02
+**Session:** dcb70181-27e3-46ef-a563-43f506ba4fde
+**Công cụ:** `ps -o rss`
+
+| Chỉ số | Giá trị | Budget cũ | Đạt? |
+|---|---|---|---|
+| **RSS (RAM)** | **123 MB** (126,288 KB) | < 100 MB | ❌ **vượt 23 MB** |
+| **%CPU** | 0.0% | < 2.0% | ✅ |
+| **%MEM** | 0.4% | — | ✅ |
+| **Gen2 GC** | (không đo lại) | 0 | ❓ |
+
+### Giải thích mức tăng so với Phase 08
+
+| Thành phần | Δ ước tính |
+|---|---|
+| AppKit/CoreGraphics dynamic loading | +3–5 MB |
+| ApplicationActivityCollector state | +2–3 MB |
+| Thêm ApplicationActivity + SyncQueue query path | +8–10 MB |
+| Change tracker cho ApplicationActivityEntity | +5–8 MB |
+| EF Core query cache mở rộng (type mới) | +5–8 MB |
+| **Tổng** | **+25–30 MB** |
+
+### ⚠️ Cảnh báo nghiêm trọng
+
+RAM đã **vượt budget 100 MB** (đặt ra ở Phase 08) khoảng 23%. Nếu tiếp tục tăng ở Phase 10 (Screenshot Engine), RSS có thể chạm **150 MB** — không chấp nhận được cho laptop nhân viên cấu hình thấp.
+
+**Đã được chấp nhận tạm thời (2026-10-02)** để unblock Phase 10, với kế hoạch optimize ở giai đoạn sau.
+
+### 🎯 Optimization phase đề xuất (bắt buộc trước khi release)
+
+Thứ tự ưu tiên (ROI cao → thấp):
+
+1. **`AddDbContextPool` thay vì `AddDbContext`** — giảm allocation cho mỗi lần query, ước tính **-10–15 MB**.
+2. **`QueryTrackingBehavior.NoTracking`** globally cho read-only queries (SyncQueue eligibility, ApplicationActivity queries) — **-5–8 MB**.
+3. **Retention policy cho SyncQueue** — xoá items đã `Synced` sau N ngày/rows, giảm DB size và EF tracking overhead.
+4. **`DeleteSentAsync` chạy định kỳ** (background timer) — giữ SyncQueue gọn.
+5. **WAL mode** SQLite — giảm I/O, gián tiếp giảm memory pressure.
+6. **Chia sẻ `ApplicationActivityCollector` state** — reset state khi session end để GC sớm.
+
+Target sau optimization: **< 100 MB** cho Phase 10.
+
+### Budget cập nhật
+
+| Phase | Budget gốc | Thực tế | Đạt? |
+|---|---|---|---|
+| Phase 01 | < 35 MB | 25.5 MB | ✅ |
+| Phase 05 | < 40 MB | 33.8 MB | ✅ |
+| Phase 06 | — | ~34 MB | ✅ |
+| Phase 07 | < 60 MB | 72.2 MB | ❌ +12 MB |
+| Phase 08 | < 100 MB | 95.1 MB | ⚠️ sát |
+| **Phase 09** | **< 100 MB** | **123 MB** | ❌ **+23 MB** |
+| Phase 10 | **cần optimize trước** | — | ⚠️ |
+
+---
+
+## 8. Cách đo lại (Runbook)
 
 Khi cần đo resource cho phase mới:
 
@@ -112,35 +228,65 @@ Khi cần đo resource cho phase mới:
 dotnet run --project src/RemoteWork.Desktop.Host
 ```
 
-### Bước 2 — Đợi ít nhất 5 phút
+### Bước 2 — Chạy ổn định & test transition
 
-Tương tác phím/chuột, để idle 1–2 phút để test transition.
+Đợi **ít nhất 5 phút** sau khi agent khởi động để:
+- SQLite migrate xong, EF Core warm-up
+- SyncEngine poll ít nhất 1–2 chu kỳ
+- GC ổn định (không còn allocation burst lúc startup)
 
-### Bước 3 — Đo bằng `ps` (nhanh nhất)
+Trong thời gian này, thực hiện:
+1. **Tương tác phím/chuột** liên tục ~30 giây → đo CPU lúc active.
+2. **Để idle 1–2 phút** (không chạm máy) → đo CPU lúc idle + kiểm tra idle detection có trigger đúng không.
+3. **Quan sát Gen2 GC** — nếu xuất hiện > 2 lần trong 5 phút → nghi vấn memory leak, cần điều tra ngay.
+
+### Bước 3 — Đo nhanh bằng `ps`
 
 ```bash
 ps -o pid,%cpu,%mem,rss,command -p $(pgrep RemoteWork.Desktop.Host)
 ```
 
-→ Cột `RSS` (KB) chia 1024 = MB.
+- Cột **`RSS`** (KB) → chia `1024` để ra **MB**.
+- Cột **`%CPU`** → đo lúc idle, nên ~0.0%.
+- Cột **`%MEM`** → tỷ lệ RAM tiến trình / tổng RAM máy.
 
-### Bước 4 — Đo bằng `dotnet-counters` (chi tiết hơn)
+**Ví dụ output Phase 08:**
+
+```
+PID   %CPU  %MEM    RSS      COMMAND
+4821   0.5   0.2   97360     RemoteWork.Desktop.Host
+```
+
+→ `97360 / 1024 ≈ 95.1 MB`.
+
+### Bước 4 — Đo chi tiết bằng `dotnet-counters`
 
 ```bash
 dotnet-counters monitor -p $(pgrep RemoteWork.Desktop.Host) --counters System.Runtime
 ```
 
-Quan tâm các chỉ số:
-- `dotnet.process.memory.working_set`
-- `dotnet.gc.collections` (Gen0 / Gen1 / **Gen2**)
-- `dotnet.thread_pool.thread.count`
-- `dotnet.monitor.lock_contentions`
+**Các chỉ số cần quan tâm:**
 
-### Bước 5 — Ghi kết quả vào bảng ở mục 2
+| Counter | Ý nghĩa | Ngưỡng |
+|---|---|---|
+| `dotnet.process.memory.working_set` | RAM thực tế (tương đương RSS) | < budget phase |
+| `dotnet.gc.collections` (Gen0 / Gen1 / **Gen2**) | Số lần GC | **Gen2 = 0** |
+| `dotnet.thread_pool.thread.count` | Số thread pool | Ổn định, không tăng |
+| `dotnet.monitor.lock_contentions` | Số lần tranh lock | Thấp, không tăng liên tục |
+
+> ⚠️ Nếu **Gen2 > 0** hoặc **thread count tăng đều** qua các lần đo → dừng lại, điều tra leak trước khi qua phase mới.
+
+### Bước 5 — Ghi kết quả
+
+Ghi tất cả số đo vào bảng tương ứng ở **mục 2** (Kết quả từng Phase) và **mục 6** (Budget cập nhật). Đính kèm:
+- Ngày đo
+- Session ID
+- Công cụ đo
+- Ghi chú bất thường (nếu có)
 
 ---
 
-## 7. Tinh chỉnh khi chạy máy yếu
+## 9. Tinh chỉnh khi chạy máy yếu
 
 Nếu triển khai trên máy cấu hình thấp (RAM 4 GB, CPU 2 cores), điều chỉnh `appsettings.json`:
 
@@ -154,61 +300,21 @@ Nếu triển khai trên máy cấu hình thấp (RAM 4 GB, CPU 2 cores), điề
 }
 ```
 
-**Tác dụng:** giảm ~30% số lần đánh thức CPU và ~60% số object phát sinh trong runtime. Đổi lại: độ chi tiết dữ liệu activity giảm.
+**Tác dụng:**
+- Giảm **~30%** số lần đánh thức CPU (sampling thưa hơn).
+- Giảm **~60%** số object phát sinh trong runtime (batch lớn hơn).
+- Giảm tải SQLite (ghi batch ít hơn).
+
+**Đánh đổi:** độ chi tiết dữ liệu activity giảm (mất granularity dưới 15 giây).
 
 ---
 
-## 8. Kết luận
+## 10. Kết luận
 
 | Câu hỏi | Trả lời |
 |---|---|
-| Agent ăn bao nhiêu RAM? | **~34 MB** ở Phase 05 |
-| Ăn bao nhiêu CPU? | **~0% khi idle**, ~0.1% khi có tương tác |
-| Có rò rỉ bộ nhớ không? | **Không** (Gen2 GC = 0) |
-| Có ổn với yêu cầu không? | **Có** — dưới ngưỡng 40 MB, sẵn sàng cho SQLite + Screenshot phase tiếp theo |
-
-
-## Phase 07 — Local SQLite Persistence (macOS)
-
-**Ngày đo:** 2026-10-02
-**Session:** 3c1ea66b-f97a-45ff-a4b2-f48fc0b9d941
-**Công cụ:** `ps -o rss` sau khi app chạy ổn định (SQLite đã migrate xong)
-
-| Chỉ số | Giá trị | Budget | Đạt? |
-|---|---|---|---|
-| **RSS (RAM)** | **72.2 MB** (73,968 KB) | < 60 MB | ❌ **Vượt 12 MB** |
-| **%CPU** | 0.0% | < 0.5% | ✅ |
-| **%MEM** | 0.2% | — | ✅ |
-| **Assembly count** | 83–143 | — | ⚠️ Tăng do EF Core |
-
-### Giải thích mức tăng
-
-| Thành phần | Ước tính |
-|---|---|
-| Phase 06 baseline | ~34 MB |
-| + EF Core meta model + change tracker | ~15–20 MB |
-| + SQLite native lib (`e_sqlite3`) | ~5–8 MB |
-| + Migration + DB connection pool | ~5–10 MB |
-| + .NET runtime overhead cho EF types | ~5 MB |
-| **Phase 07 tổng** | **~72 MB** |
-
-### Khuyến nghị giảm RAM (chưa implement)
-
-1. **WAL mode** — giảm I/O contention, không tăng RAM nhưng cải thiện throughput
-2. **`QueryTrackingBehavior.NoTracking`** globally cho read-only queries → giảm change tracker overhead ~5–10 MB
-3. **`AddDbContextPool`** thay vì `AddDbContext` → tái dùng context, giảm allocation
-4. **Retention policy** — xoá batch cũ > N ngày khỏi SQLite → giảm disk, không giảm RAM nhưng cần cho long-run
-5. **Lazy loading** — đảm bảo tắt (`UseLazyLoadingProxies` mặc định off) → đang đúng
-6. **Chỉ giữ DbContext scoped khi cần** — hiện tại đã scoped ✅
-
-### Cập nhật Budget thực tế
-
-| Phase | Budget gốc | Thực tế | Chênh lệch |
-|---|---|---|---|
-| Phase 01 | < 35 MB | 25.5 MB | ✅ |
-| Phase 05 | < 40 MB | 33.8 MB | ✅ |
-| Phase 06 | (không thêm) | ~34 MB | ✅ |
-| **Phase 07** | **< 60 MB** | **72.2 MB** | ❌ **+12 MB** |
-| Phase 08 (sync) | < 100 MB | — | ⏳ |
-
-**Kết luận:** SQLite + EF Core tốn RAM nhiều hơn dự kiến. **Cần optimization phase trước khi thêm sync layer**, nếu không sẽ vượt 100 MB ở Phase 08.
+| Agent ăn bao nhiêu RAM? | **~34 MB** ở Phase 05 → **~72 MB** ở Phase 07 → **~95 MB** ở Phase 08 → **~123 MB** ở Phase 09 |
+| Ăn bao nhiêu CPU? | **~0% khi idle**, **~0.5% khi sync active** |
+| Có rò rỉ bộ nhớ không? | **Chưa kết luận** — Gen2 GC xuất hiện lần đầu ở Phase 08 (1 lần/session 3.5 phút). Phase 09 chưa đo lại Gen2, cần theo dõi tiếp. |
+| Có ổn với yêu cầu không? | **Phase 05 ✅ đạt** · **Phase 07 ❌ vượt 12 MB** · **Phase 08 ⚠️ sát ngưỡng 100 MB** · **Phase 09 ❌ vượt 23 MB** |
+| Cần làm gì tiếp? | **Bắt buộc optimize trước Phase 10**: `AddDbContextPool`, `NoTracking`, WAL mode, retention policy — nếu không Phase 10 (Screenshot) sẽ vượt xa 100 MB. |
