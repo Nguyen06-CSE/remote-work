@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using RemoteWork.Desktop.Core.Configuration;
+using RemoteWork.Desktop.Core.Interfaces;
 using RemoteWork.Desktop.Infrastructure.Configuration;
 
 namespace RemoteWork.Desktop.Infrastructure;
@@ -21,6 +22,8 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddOptions<AgentOptions>()
             .Bind(configuration.GetSection(AgentOptions.SectionName))
             .ValidateOnStart();
+
+        services.AddSingleton<ISyncTransport, Transport.InMemorySyncTransport>();
 
         return services;
     }

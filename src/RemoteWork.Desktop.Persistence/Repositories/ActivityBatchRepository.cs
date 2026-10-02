@@ -17,6 +17,12 @@ public sealed class ActivityBatchRepository : IActivityBatchRepository
 
     public async Task SaveAsync(ActivityBatch batch, CancellationToken ct = default)
     {
+        var existing = await _context.ActivityBatches.FindAsync([batch.BatchId], ct);
+        if (existing is not null)
+        {
+            return; // Idempotent: already saved
+        }
+
         var entity = new ActivityBatchEntity
         {
             BatchId = batch.BatchId,

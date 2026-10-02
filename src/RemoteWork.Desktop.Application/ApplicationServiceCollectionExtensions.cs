@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using RemoteWork.Desktop.Application.Collectors;
 using RemoteWork.Desktop.Application.Monitoring;
 using RemoteWork.Desktop.Application.Options;
+using RemoteWork.Desktop.Application.Sync;
 using RemoteWork.Desktop.Core.Interfaces;
 using RemoteWork.Desktop.Core.Models;
 using RemoteWork.Desktop.Platform.Abstractions;
@@ -14,11 +15,21 @@ public static class ApplicationServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(
         this IServiceCollection services,
-        Action<TrackingOptions>? configureOptions = null)
+        Action<TrackingOptions>? configureOptions = null,
+        Action<SyncOptions>? configureSyncOptions = null)
     {
         if (configureOptions is not null)
         {
             services.Configure(configureOptions);
+        }
+
+        if (configureSyncOptions is not null)
+        {
+            services.Configure(configureSyncOptions);
+        }
+        else
+        {
+            services.AddOptions<SyncOptions>();
         }
 
         services.AddSingleton<AgentRuntimeState>();
@@ -57,6 +68,11 @@ public static class ApplicationServiceCollectionExtensions
         });
 
         services.AddSingleton<MonitoringService>(sp => (MonitoringService)sp.GetRequiredService<IMonitoringService>());
+
+        // Offline-first Sync and Persistence services
+        services.AddScoped<TrackingPersistenceCoordinator>();
+        services.AddSingleton<ISyncEngine, SyncEngine>();
+        services.AddSingleton<SyncEngine>(sp => (SyncEngine)sp.GetRequiredService<ISyncEngine>());
 
         return services;
     }

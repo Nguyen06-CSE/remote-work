@@ -1,7 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RemoteWork.Desktop.Application.Collectors;
+using RemoteWork.Desktop.Application.Monitoring;
+using RemoteWork.Desktop.Application.Sync;
 using RemoteWork.Desktop.Core.Interfaces;
 using RemoteWork.Desktop.Core.Models;
 using RemoteWork.Desktop.Infrastructure.Configuration;
@@ -15,7 +18,9 @@ public sealed class Worker : BackgroundService
     private readonly AgentRuntimeState _state;
     private readonly DeviceCollector _deviceCollector;
     private readonly ISessionCollector _sessionCollector;
-    private readonly IMonitoringService _monitoringService;
+    private readonly MonitoringService _monitoringService;
+    private readonly ISyncEngine _syncEngine;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public Worker(
         ILogger<Worker> logger,
@@ -23,7 +28,9 @@ public sealed class Worker : BackgroundService
         AgentRuntimeState state,
         DeviceCollector deviceCollector,
         ISessionCollector sessionCollector,
-        IMonitoringService monitoringService)
+        MonitoringService monitoringService,
+        ISyncEngine syncEngine,
+        IServiceScopeFactory scopeFactory)
     {
         _logger = logger;
         _options = options.Value;
@@ -31,6 +38,8 @@ public sealed class Worker : BackgroundService
         _deviceCollector = deviceCollector;
         _sessionCollector = sessionCollector;
         _monitoringService = monitoringService;
+        _syncEngine = syncEngine;
+        _scopeFactory = scopeFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -61,10 +70,29 @@ public sealed class Worker : BackgroundService
             _state.MarkRunning();
             _logger.LogInformation("Agent status: {Status}", _state.Status);
 
-            // 4. Khởi động MonitoringService
-            await _monitoringService.StartAsync(stoppingToken);
+            // 4. Kết nối pipeline: Collector -> SQLite -> SyncQueue
+            _monitoringService.OnBatchGenerated += batch =>
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        using var scope = _scopeFactory.CreateScope();
+                        var coordinator = scope.ServiceProvider.GetRequiredService<TrackingPersistenceCoordinator>();
+                        await coordinator.PersistAndEnqueueBatchAsync(batch);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to persist and queue ActivityBatch {BatchId}.", batch.BatchId);
+                    }
+                });
+            };
 
-            // 5. Giữ Worker chạy cho tới khi có tín hiệu shutdown
+            // 5. Khởi động MonitoringService và SyncEngine
+            await _monitoringService.StartAsync(stoppingToken);
+            await _syncEngine.StartAsync(stoppingToken);
+
+            // 6. Giữ Worker chạy cho tới khi có tín hiệu shutdown
             await Task.Delay(Timeout.Infinite, stoppingToken);
         }
         catch (OperationCanceledException)
@@ -82,6 +110,7 @@ public sealed class Worker : BackgroundService
             _state.MarkStopping();
             _logger.LogInformation("Agent status: {Status}", _state.Status);
 
+            await _syncEngine.StopAsync(CancellationToken.None);
             await _monitoringService.StopAsync(CancellationToken.None);
             _sessionCollector.EndSession();
 
