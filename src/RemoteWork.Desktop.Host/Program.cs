@@ -16,7 +16,7 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
 // 2. Persistence Layer
-builder.Services.AddPersistenceServices();
+builder.Services.AddPersistenceServices(builder.Configuration);
 
 // 3. Platform Detection & Services
 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -49,4 +49,12 @@ builder.Services.AddApplicationServices(options =>
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
+
+// Run database initialization
+using (var scope = host.Services.CreateScope())
+{
+    var initializer = scope.ServiceProvider.GetRequiredService<RemoteWork.Desktop.Persistence.Data.DatabaseInitializer>();
+    await initializer.InitializeAsync();
+}
+
 await host.RunAsync();
