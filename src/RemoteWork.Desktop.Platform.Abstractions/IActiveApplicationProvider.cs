@@ -1,3 +1,5 @@
+using RemoteWork.Desktop.Core.Models;
+
 namespace RemoteWork.Desktop.Platform.Abstractions;
 
 public sealed class ActiveApplicationInfo
@@ -9,7 +11,24 @@ public sealed class ActiveApplicationInfo
     public DateTimeOffset Timestamp { get; init; }
 }
 
-public interface IActiveApplicationProvider
+public interface IActiveApplicationProvider : IApplicationActivityProvider
 {
     ActiveApplicationInfo? GetActiveApplication();
+
+    ApplicationActivity? IApplicationActivityProvider.GetActiveApplicationActivity()
+    {
+        var app = GetActiveApplication();
+        if (app is null) return null;
+
+        return new ApplicationActivity
+        {
+            ActivityId = Guid.NewGuid().ToString(),
+            DeviceId = string.Empty,
+            Timestamp = app.Timestamp,
+            ApplicationName = app.ApplicationName,
+            ProcessName = app.ProcessName,
+            ProcessId = app.ProcessId,
+            WindowTitle = app.WindowTitle
+        };
+    }
 }
