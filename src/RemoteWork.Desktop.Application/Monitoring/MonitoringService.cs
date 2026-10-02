@@ -1,13 +1,24 @@
 using Microsoft.Extensions.Logging;
 using RemoteWork.Desktop.Core.Interfaces;
+using RemoteWork.Desktop.Core.Models.Activity;
 using RemoteWork.Desktop.Platform.Abstractions;
 
 namespace RemoteWork.Desktop.Application.Monitoring;
 
+/// <summary>
+/// Background runtime orchestrating periodic activity sampling, batch aggregation, and provider lifecycles.
+/// Responsibilities:
+/// - Coordinates ActivityCollector, Session, and native platform providers.
+/// - Controls explicit Start / Stop lifecycles with CancellationToken support.
+/// - Graceful Shutdown: flushes pending activity upon termination so no sampled work is lost.
+/// - Emits OnBatchGenerated whenever an ActivityBatch is created.
+/// - Error Isolation: Exceptions during individual ticks are logged without crashing the host process.
+/// </summary>
 public sealed class MonitoringService : IMonitoringService
 {
     private readonly IActivityCollector _activityCollector;
     private readonly IInputActivityProvider _inputProvider;
+    private readonly ISessionCollector _sessionCollector;
     private readonly int _samplingIntervalSeconds;
     private readonly int _batchIntervalSeconds;
     private readonly ILogger<MonitoringService> _logger;
@@ -15,15 +26,19 @@ public sealed class MonitoringService : IMonitoringService
     private Task? _monitoringTask;
     private CancellationTokenSource? _internalCts;
 
+    public event Action<ActivityBatch>? OnBatchGenerated;
+
     public MonitoringService(
         IActivityCollector activityCollector,
         IInputActivityProvider inputProvider,
+        ISessionCollector sessionCollector,
         int samplingIntervalSeconds,
         int batchIntervalSeconds,
         ILogger<MonitoringService> logger)
     {
         _activityCollector = activityCollector;
         _inputProvider = inputProvider;
+        _sessionCollector = sessionCollector;
         _samplingIntervalSeconds = samplingIntervalSeconds > 0 ? samplingIntervalSeconds : 10;
         _batchIntervalSeconds = batchIntervalSeconds > 0 ? batchIntervalSeconds : 60;
         _logger = logger;
@@ -34,8 +49,15 @@ public sealed class MonitoringService : IMonitoringService
         if (_monitoringTask is not null)
             return Task.CompletedTask;
 
-        _inputProvider.Start();
-        _logger.LogInformation("Input hooks installed.");
+        try
+        {
+            _inputProvider.Start();
+            _logger.LogInformation("Input activity provider started.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to start input activity provider.");
+        }
 
         _internalCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _monitoringTask = RunAsync(_internalCts.Token);
@@ -60,10 +82,46 @@ public sealed class MonitoringService : IMonitoringService
             {
                 // Expected when canceling
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while awaiting monitoring background loop termination.");
+            }
         }
 
-        _inputProvider.Stop();
-        _logger.LogInformation("Input hooks removed.");
+        // Graceful shutdown: flush any pending aggregated activity
+        try
+        {
+            var session = _sessionCollector.GetCurrentSession();
+            if (session is not null)
+            {
+                _activityCollector.Collect(); // Final sample
+                var finalBatch = _activityCollector.FlushBatch();
+
+                _logger.LogInformation(
+                    "Final activity batch flushed on shutdown. BatchId={BatchId}, Keyboard={Keyboard}, Mouse={Mouse}, Active={Active}, Idle={Idle}",
+                    finalBatch.BatchId,
+                    finalBatch.KeyboardCount,
+                    finalBatch.MouseCount,
+                    finalBatch.ActiveDuration,
+                    finalBatch.IdleDuration);
+
+                OnBatchGenerated?.Invoke(finalBatch);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to flush final activity batch during graceful shutdown.");
+        }
+
+        try
+        {
+            _inputProvider.Stop();
+            _logger.LogInformation("Input activity provider stopped.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while stopping input activity provider.");
+        }
 
         _monitoringTask = null;
         _internalCts.Dispose();
@@ -79,6 +137,13 @@ public sealed class MonitoringService : IMonitoringService
         {
             try
             {
+                var session = _sessionCollector.GetCurrentSession();
+                if (session is null)
+                {
+                    _logger.LogTrace("Skipping activity collection tick: no active session.");
+                    continue;
+                }
+
                 var events = _activityCollector.Collect();
 
                 foreach (var activityEvent in events)
@@ -104,6 +169,8 @@ public sealed class MonitoringService : IMonitoringService
                         batch.MouseCount,
                         batch.ActiveDuration,
                         batch.IdleDuration);
+
+                    OnBatchGenerated?.Invoke(batch);
 
                     lastBatchTime = DateTimeOffset.UtcNow;
                 }

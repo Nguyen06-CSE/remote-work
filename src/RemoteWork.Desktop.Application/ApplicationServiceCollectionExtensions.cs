@@ -43,16 +43,20 @@ public static class ApplicationServiceCollectionExtensions
         {
             var activityCollector = sp.GetRequiredService<IActivityCollector>();
             var inputProvider = sp.GetRequiredService<IInputActivityProvider>();
+            var sessionCollector = sp.GetRequiredService<ISessionCollector>();
             var options = sp.GetService<IOptions<TrackingOptions>>()?.Value ?? new TrackingOptions();
             var logger = sp.GetRequiredService<ILogger<MonitoringService>>();
 
             return new MonitoringService(
                 activityCollector,
                 inputProvider,
+                sessionCollector,
                 options.ActivitySamplingIntervalSeconds,
                 options.ActivityBatchIntervalSeconds,
                 logger);
         });
+
+        services.AddSingleton<MonitoringService>(sp => (MonitoringService)sp.GetRequiredService<IMonitoringService>());
 
         return services;
     }

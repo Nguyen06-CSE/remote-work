@@ -8,10 +8,12 @@ namespace RemoteWork.Desktop.Application.Collectors;
 /// <summary>
 /// Orchestrates input and idle activity sampling, state transition detection, and aggregation.
 /// Principles:
+/// - Error Isolation: Failure in one collector (keyboard, mouse, or idle) does not crash the pipeline.
 /// - Only emits ActivityStateChanged when the state changes (Active <-> Idle).
 /// - Never emits redundant Active state events every cycle.
 /// - Accumulates keyboard and mouse counts into an ActivityAccumulator.
 /// - Flushes periodic ActivityBatch objects representing aggregated intervals.
+/// - Guarantees ActiveDuration + IdleDuration is approximately equal to EndedAt - StartedAt.
 /// </summary>
 public sealed class ActivityCollector : IActivityCollector
 {
@@ -57,7 +59,17 @@ public sealed class ActivityCollector : IActivityCollector
         var now = DateTimeOffset.UtcNow;
         _batchStartedAt ??= now;
 
-        var currentIsActive = _idleCollector.IsUserActive();
+        // 1. Error-isolated idle collection
+        var currentIsActive = true;
+        try
+        {
+            currentIsActive = _idleCollector.IsUserActive();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to collect idle status from idle provider. Assuming active as safe fallback.");
+        }
+
         var currentActivityState = currentIsActive ? ActivityState.Active : ActivityState.Idle;
 
         if (_lastTimestamp is null)
@@ -66,7 +78,8 @@ public sealed class ActivityCollector : IActivityCollector
         }
         else
         {
-            UpdateDuration(currentActivityState, now);
+            var stateForElapsed = _previousState ?? currentActivityState;
+            UpdateDuration(stateForElapsed, now);
         }
 
         var events = new List<ActivityEvent>();
@@ -87,11 +100,29 @@ public sealed class ActivityCollector : IActivityCollector
             _previousState = currentActivityState;
         }
 
-        var keyboardCount = _keyboardCollector.Collect();
-        var mouseCount = _mouseCollector.Collect();
+        // 2. Error-isolated keyboard collection
+        var keyboardCount = 0;
+        try
+        {
+            keyboardCount = _keyboardCollector.Collect();
+            _accumulator.AddKeyboard(keyboardCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to collect keyboard activity. Continuing with other collectors.");
+        }
 
-        _accumulator.AddKeyboard(keyboardCount);
-        _accumulator.AddMouse(mouseCount);
+        // 3. Error-isolated mouse collection
+        var mouseCount = 0;
+        try
+        {
+            mouseCount = _mouseCollector.Collect();
+            _accumulator.AddMouse(mouseCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to collect mouse activity. Continuing with other collectors.");
+        }
 
         if (keyboardCount > 0)
         {
@@ -119,23 +150,30 @@ public sealed class ActivityCollector : IActivityCollector
             });
         }
 
-        // Ephemeral Bot Detection: Draining & Purging samples immediately
-        var mouseSamples = _mouseCollector.DrainSamples();
-        if (mouseSamples.Count > 0)
+        // 4. Error-isolated ephemeral bot detection
+        try
         {
-            var detectionResult = _mouseBotDetector.Analyze(mouseSamples);
-            if (detectionResult.IsSuspicious)
+            var mouseSamples = _mouseCollector.DrainSamples();
+            if (mouseSamples.Count > 0)
             {
-                _accumulator.MarkSuspiciousMouseActivity();
-                events.Add(new ActivityEvent
+                var detectionResult = _mouseBotDetector.Analyze(mouseSamples);
+                if (detectionResult.IsSuspicious)
                 {
-                    EventId = Guid.NewGuid().ToString(),
-                    DeviceId = session.DeviceId,
-                    SessionId = session.SessionId,
-                    Timestamp = detectionResult.Timestamp,
-                    Type = ActivityEventType.SuspiciousActivityDetected
-                });
+                    _accumulator.MarkSuspiciousMouseActivity();
+                    events.Add(new ActivityEvent
+                    {
+                        EventId = Guid.NewGuid().ToString(),
+                        DeviceId = session.DeviceId,
+                        SessionId = session.SessionId,
+                        Timestamp = detectionResult.Timestamp,
+                        Type = ActivityEventType.SuspiciousActivityDetected
+                    });
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to process mouse samples for bot detection.");
         }
 
         return events;
@@ -148,6 +186,13 @@ public sealed class ActivityCollector : IActivityCollector
 
         var now = DateTimeOffset.UtcNow;
         var startedAt = _batchStartedAt ?? now;
+
+        // If time has elapsed since the last sampled timestamp, attribute it to current state
+        if (_lastTimestamp is not null && now > _lastTimestamp.Value)
+        {
+            var currentState = _previousState ?? ActivityState.Active;
+            UpdateDuration(currentState, now);
+        }
 
         var batch = new ActivityBatch
         {
@@ -176,6 +221,8 @@ public sealed class ActivityCollector : IActivityCollector
             return;
 
         var elapsed = now - _lastTimestamp.Value;
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
 
         if (currentState == ActivityState.Active)
         {

@@ -12,17 +12,29 @@ public class ActivityCollectorTests
     private sealed class StubIdleCollector : IIdleActivityCollector
     {
         public bool Active { get; set; } = true;
-        public bool IsUserActive() => Active;
+        public bool ThrowOnIdle { get; set; }
+
+        public bool IsUserActive()
+        {
+            if (ThrowOnIdle)
+                throw new InvalidOperationException("Simulated idle hardware failure.");
+            return Active;
+        }
     }
 
     private sealed class StubCountCollector : IKeyboardActivityCollector, IMouseActivityCollector
     {
         public int NextKeyboardCount { get; set; }
         public int NextMouseCount { get; set; }
+        public bool ThrowOnKeyboard { get; set; }
+        public bool ThrowOnMouse { get; set; }
         public List<MouseClickSample> SamplesToDrain { get; set; } = [];
 
         int IKeyboardActivityCollector.Collect()
         {
+            if (ThrowOnKeyboard)
+                throw new InvalidOperationException("Simulated keyboard hook crash.");
+
             var count = NextKeyboardCount;
             NextKeyboardCount = 0;
             return count;
@@ -30,6 +42,9 @@ public class ActivityCollectorTests
 
         int IMouseActivityCollector.Collect()
         {
+            if (ThrowOnMouse)
+                throw new InvalidOperationException("Simulated mouse driver failure.");
+
             var count = NextMouseCount;
             NextMouseCount = 0;
             return count;
@@ -274,5 +289,201 @@ public class ActivityCollectorTests
         var batch2 = collector.FlushBatch();
         Assert.Equal(0, batch2.KeyboardCount);
         Assert.Equal(0, batch2.MouseCount);
+    }
+
+    [Fact]
+    public void BatchDuration_SumOfActiveAndIdleDuration_ApproximatelyEqualsBatchDuration()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        collector.Collect(); // Initialize start
+        Thread.Sleep(30);
+
+        idleCollector.Active = false;
+        collector.Collect(); // Transition to idle
+        Thread.Sleep(30);
+
+        var batch = collector.FlushBatch();
+
+        var totalBatchDuration = batch.EndedAt - batch.StartedAt;
+        var sumOfDurations = batch.ActiveDuration + batch.IdleDuration;
+
+        // Ensure ActiveDuration + IdleDuration is approximately equal to EndedAt - StartedAt
+        var difference = Math.Abs((totalBatchDuration - sumOfDurations).TotalMilliseconds);
+        Assert.True(difference < 15, $"Difference between batch duration and sum was {difference} ms (expected < 15 ms).");
+        Assert.True(batch.ActiveDuration > TimeSpan.Zero);
+        Assert.True(batch.IdleDuration > TimeSpan.Zero);
+    }
+
+    [Fact]
+    public void BatchBoundaries_MaintainSequentialTimestamps()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        collector.Collect();
+        Thread.Sleep(20);
+        var batch1 = collector.FlushBatch();
+
+        Thread.Sleep(20);
+        collector.Collect();
+        var batch2 = collector.FlushBatch();
+
+        Assert.True(batch1.StartedAt <= batch1.EndedAt);
+        Assert.True(batch2.StartedAt <= batch2.EndedAt);
+        Assert.True(batch2.StartedAt >= batch1.EndedAt);
+    }
+
+    [Fact]
+    public void Batch_IsAssociatedWithCurrentSessionAndDeviceId()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        var session = sessionCollector.StartSession("device-unique-999");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector();
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        collector.Collect();
+        var batch = collector.FlushBatch();
+
+        Assert.Equal("device-unique-999", batch.DeviceId);
+        Assert.Equal(session.SessionId, batch.SessionId);
+        Assert.False(string.IsNullOrWhiteSpace(batch.BatchId));
+    }
+
+    [Fact]
+    public void Collect_WhenKeyboardCollectorFails_IsolatesErrorAndCollectsMouse()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector
+        {
+            ThrowOnKeyboard = true,
+            NextMouseCount = 7
+        };
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Does not throw despite keyboard failure
+        var events = collector.Collect();
+
+        // Mouse activity was successfully gathered despite keyboard failure
+        Assert.Contains(events, e => e.Type == ActivityEventType.MouseActivity && e.Count == 7);
+
+        var batch = collector.FlushBatch();
+        Assert.Equal(0, batch.KeyboardCount);
+        Assert.Equal(7, batch.MouseCount);
+    }
+
+    [Fact]
+    public void Collect_WhenMouseCollectorFails_IsolatesErrorAndCollectsKeyboard()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector { Active = true };
+        var countCollector = new StubCountCollector
+        {
+            ThrowOnMouse = true,
+            NextKeyboardCount = 14
+        };
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Does not throw despite mouse failure
+        var events = collector.Collect();
+
+        // Keyboard activity was successfully gathered despite mouse failure
+        Assert.Contains(events, e => e.Type == ActivityEventType.KeyboardActivity && e.Count == 14);
+
+        var batch = collector.FlushBatch();
+        Assert.Equal(14, batch.KeyboardCount);
+        Assert.Equal(0, batch.MouseCount);
+    }
+
+    [Fact]
+    public void Collect_WhenIdleCollectorFails_IsolatesErrorAndCollectsInput()
+    {
+        var sessionCollector = new SessionCollector(NullLogger<SessionCollector>.Instance);
+        sessionCollector.StartSession("device-001");
+
+        var idleCollector = new StubIdleCollector
+        {
+            ThrowOnIdle = true
+        };
+        var countCollector = new StubCountCollector
+        {
+            NextKeyboardCount = 8,
+            NextMouseCount = 4
+        };
+        var botDetector = new StubBotDetector();
+
+        var collector = new ActivityCollector(
+            sessionCollector,
+            idleCollector,
+            countCollector,
+            countCollector,
+            botDetector,
+            NullLogger<ActivityCollector>.Instance);
+
+        // Does not throw; falls back safely to Active
+        var events = collector.Collect();
+
+        Assert.Contains(events, e => e.Type == ActivityEventType.KeyboardActivity && e.Count == 8);
+        Assert.Contains(events, e => e.Type == ActivityEventType.MouseActivity && e.Count == 4);
+
+        var batch = collector.FlushBatch();
+        Assert.Equal(8, batch.KeyboardCount);
+        Assert.Equal(4, batch.MouseCount);
     }
 }
